@@ -2,6 +2,12 @@
 
 **Modern PHP 8.1+ email library with decoupled architecture**
 
+[![Latest Version](https://img.shields.io/packagist/v/zenomailer/zenomailer.svg)](https://packagist.org/packages/zenomailer/zenomailer)
+[![Total Downloads](https://img.shields.io/packagist/dt/zenomailer/zenomailer.svg)](https://packagist.org/packages/zenomailer/zenomailer)
+[![Tests](https://github.com/cmatosbc/zeno-mailer/actions/workflows/tests.yml/badge.svg)](https://github.com/cmatosbc/zeno-mailer/actions/workflows/tests.yml)
+[![PHP Version](https://img.shields.io/packagist/php-v/zenomailer/zenomailer.svg)](https://packagist.org/packages/zenomailer/zenomailer)
+[![License](https://img.shields.io/packagist/l/zenomailer/zenomailer.svg)](LICENSE)
+
 A clean-slate email library built on modern principles with a strict separation of concerns.
 
 ## Why ZenoMailer?
@@ -284,9 +290,17 @@ foreach ($results as $result) {
 
 ## Installation
 
+Available on [Packagist](https://packagist.org/packages/zenomailer/zenomailer).
+
 ```bash
 composer require zenomailer/zenomailer
 ```
+
+> **Beta note:** while the project is in beta, require it with a stability flag:
+>
+> ```bash
+> composer require zenomailer/zenomailer:^0.1.0@beta
+> ```
 
 ## Documentation
 
