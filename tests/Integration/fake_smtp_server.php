@@ -94,6 +94,8 @@ while ($sessions < $expectedSessions) {
         } elseif (str_starts_with($upper, 'RCPT TO')) {
             if ($mode === 'reject_rcpt' && str_contains($command, 'bad@')) {
                 fwrite($conn, "550 mailbox unavailable\r\n");
+            } elseif ($mode === 'tempfail' && str_contains($command, 'bad@')) {
+                fwrite($conn, "451 temporary local problem, try again\r\n");
             } else {
                 fwrite($conn, "250 OK\r\n");
             }

@@ -93,8 +93,21 @@ final class SmtpTransport implements TransportInterface, SignableTransport
             return TransportResult::failure($e->getMessage(), [
                 'host' => $this->host,
                 'port' => $this->port,
-            ]);
+            ], $this->isRetryableError($e));
         }
+    }
+
+    /**
+     * SMTP 4xx replies and connection-level problems are transient;
+     * 5xx replies and envelope validation errors are not.
+     */
+    private function isRetryableError(\Exception $e): bool
+    {
+        if ($e instanceof SmtpReplyException) {
+            return $e->isTransient();
+        }
+
+        return !$e instanceof \InvalidArgumentException;
     }
 
     /**
@@ -401,6 +414,6 @@ final class SmtpTransport implements TransportInterface, SignableTransport
             }
         }
 
-        throw new \RuntimeException("{$what} failed: {$response}");
+        throw new SmtpReplyException($what, $response);
     }
 }

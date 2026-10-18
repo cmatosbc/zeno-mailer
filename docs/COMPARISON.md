@@ -37,6 +37,9 @@ A feature-by-feature comparison, including what was verified empirically (marked
 | HTTP API transports | ❌ | ✅ Brevo, Postmark, SES, JMAP — one identical API |
 | Concurrent batch sending | ❌ | ✅ curl_multi, measured **5x** (402ms vs 2007ms for 5 delayed requests) |
 | Structured send results | ❌ (bool + `ErrorInfo`) | ✅ `TransportResult`: success, message, message ID, metadata |
+| Auto-retry with backoff + jitter | ❌ | ✅ transient failures (SMTP 4xx, HTTP 429/5xx) retried automatically |
+| Rate limiting | ❌ | ✅ token bucket per transport **[verified live: paces real API calls]** |
+| Failover transport chain | ❌ | ✅ ordered backup transports **[verified live: dead SMTP primary rescued by Brevo]** |
 | Middleware / extensibility | subclassing | ✅ composable pipeline (CSS inliner, dark mode guard, PSR-3 telemetry, custom) |
 | DSN configuration | ✅ (`DSNConfigurator`) | ✅ all transports |
 | Header injection defense | ✅ mature | ✅ validated/encoded at the boundary; CR/LF rejected |

@@ -11,6 +11,7 @@ final class TransportResult
     private ?string $messageId;
     /** @var array<string, mixed> */
     private array $metadata;
+    private bool $retryable;
 
     /**
      * @param array<string, mixed> $metadata
@@ -19,12 +20,14 @@ final class TransportResult
         bool $success,
         string $message = '',
         ?string $messageId = null,
-        array $metadata = []
+        array $metadata = [],
+        bool $retryable = false
     ) {
         $this->success = $success;
         $this->message = $message;
         $this->messageId = $messageId;
         $this->metadata = $metadata;
+        $this->retryable = $success ? false : $retryable;
     }
 
     /**
@@ -38,9 +41,9 @@ final class TransportResult
     /**
      * @param array<string, mixed> $metadata
      */
-    public static function failure(string $message, array $metadata = []): self
+    public static function failure(string $message, array $metadata = [], bool $retryable = false): self
     {
-        return new self(false, $message, null, $metadata);
+        return new self(false, $message, null, $metadata, $retryable);
     }
 
     public function isSuccess(): bool
@@ -62,5 +65,14 @@ final class TransportResult
     public function getMetadata(): array
     {
         return $this->metadata;
+    }
+
+    /**
+     * True when the failure is transient (network error, HTTP 429/5xx,
+     * SMTP 4xx reply) and a retry may succeed.
+     */
+    public function isRetryable(): bool
+    {
+        return $this->retryable;
     }
 }

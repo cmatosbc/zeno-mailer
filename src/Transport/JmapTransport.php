@@ -78,17 +78,24 @@ final class JmapTransport implements TransportInterface
                 $errorMessage = is_array($responseData) ? ($responseData['type'] ?? null) : null;
                 $errorMessage ??= mb_substr(trim($response->getBody()), 0, 200) ?: 'Unknown error';
 
+                $retryable = $response->getStatus() === 429
+                    || $response->getStatus() === 408
+                    || $response->getStatus() >= 500;
+
                 return TransportResult::failure("JMAP error: {$errorMessage}", [
                     'http_code' => $response->getStatus(),
                     'response' => $responseData,
-                ]);
+                ], $retryable);
             }
 
             return $this->interpretSubmissionResponse($response);
         } catch (\JsonException $e) {
             return TransportResult::failure('JMAP payload encoding failed: ' . $e->getMessage());
-        } catch (\Exception $e) {
+        } catch (\InvalidArgumentException $e) {
             return TransportResult::failure($e->getMessage());
+        } catch (\Exception $e) {
+            // Network-level errors (DNS, connect, timeout) are transient
+            return TransportResult::failure($e->getMessage(), [], true);
         }
     }
 

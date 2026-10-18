@@ -135,6 +135,17 @@ final class SesTransportTest extends TestCase
         self::assertTrue($hasAmzDate);
     }
 
+    public function testSesThrottlingIsMarkedRetryable(): void
+    {
+        $client = new MockHttpClient(new HttpResponse(400, '<ErrorResponse><Error><Code>Throttling</Code></Error></ErrorResponse>'));
+        $transport = new SesTransport('AKIA', 'SECRET', 'us-east-1', [], $client);
+
+        $result = $transport->send($this->envelope());
+
+        self::assertFalse($result->isSuccess());
+        self::assertTrue($result->isRetryable(), 'SES Throttling is transient');
+    }
+
     public function testUtf8LocalPartIsRejectedExplicitly(): void
     {
         $client = new MockHttpClient();

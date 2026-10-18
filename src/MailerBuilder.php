@@ -9,6 +9,10 @@ use ZenoMailer\Middleware\CssInlinerMiddleware;
 use ZenoMailer\Middleware\DarkModeGuardMiddleware;
 use ZenoMailer\Middleware\MiddlewareInterface;
 use ZenoMailer\Middleware\TelemetryMiddleware;
+use ZenoMailer\Transport\FailoverTransport;
+use ZenoMailer\Transport\RateLimitedTransport;
+use ZenoMailer\Transport\RateLimiter;
+use ZenoMailer\Transport\RetryTransport;
 use ZenoMailer\Transport\SignableTransport;
 use ZenoMailer\Transport\TransportFactory;
 use ZenoMailer\Transport\TransportInterface;
@@ -24,6 +28,11 @@ final class MailerBuilder
     private bool $enableTelemetry = false;
     private ?LoggerInterface $logger = null;
     private ?DkimSigner $dkimSigner = null;
+    /** @var list<TransportInterface> */
+    private array $failovers = [];
+    private ?RateLimiter $rateLimiter = null;
+    /** @var array{0: int, 1: float, 2: float}|null */
+    private ?array $retryConfig = null;
 
     public static function create(): self
     {
@@ -80,15 +89,61 @@ final class MailerBuilder
         return $this;
     }
 
+    /**
+     * Retry transient failures (SMTP 4xx, HTTP 429/5xx, network errors)
+     * with exponential backoff and jitter.
+     *
+     * @param int $maxAttempts Total attempts (including the first)
+     * @param float $baseDelayMs Delay before the first retry
+     * @param float $maxDelayMs Backoff ceiling
+     */
+    public function withRetry(int $maxAttempts = 3, float $baseDelayMs = 500.0, float $maxDelayMs = 5000.0): self
+    {
+        $this->retryConfig = [$maxAttempts, $baseDelayMs, $maxDelayMs];
+        return $this;
+    }
+
+    /**
+     * Throttle sends with a token bucket, e.g. withRateLimit(300, 'day')
+     * for Brevo's free tier, or withRateLimit(60) for 60/minute.
+     *
+     * @param string|float $period 'second', 'minute', 'hour', 'day' or seconds
+     */
+    public function withRateLimit(int $maxPerPeriod, string|float $period = 'minute'): self
+    {
+        $seconds = match (true) {
+            is_float($period) => $period,
+            $period === 'second' => 1.0,
+            $period === 'minute' => 60.0,
+            $period === 'hour' => 3600.0,
+            $period === 'day' => 86400.0,
+            default => throw new \InvalidArgumentException(
+                "Invalid rate limit period: {$period} (use 'second', 'minute', 'hour', 'day' or a float of seconds)"
+            ),
+        };
+
+        $this->rateLimiter = new RateLimiter($maxPerPeriod, $seconds);
+        return $this;
+    }
+
+    /**
+     * Add a backup transport: when the primary (and any earlier backups)
+     * fail, the next candidate is tried. Each candidate gets the retry and
+     * rate-limit configuration.
+     */
+    public function withFailover(TransportInterface $transport): self
+    {
+        $this->failovers[] = $transport;
+        return $this;
+    }
+
     public function build(): Mailer
     {
         if ($this->transport === null) {
             throw new \RuntimeException('Transport must be configured before building Mailer');
         }
 
-        $mailer = new Mailer($this->transport);
-        $pipeline = $mailer->getPipeline();
-
+        // DKIM applies to the raw primary transport, before resilience wrapping
         if ($this->dkimSigner !== null) {
             if (!$this->transport instanceof SignableTransport) {
                 throw new \RuntimeException(
@@ -97,6 +152,15 @@ final class MailerBuilder
             }
             $this->transport->setDkimSigner($this->dkimSigner);
         }
+
+        // Resilience: rate limit inside retry (every attempt consumes budget),
+        // failover outermost (each candidate gets the full resilience stack).
+        $candidates = [$this->transport, ...$this->failovers];
+        $wrapped = array_map(fn (TransportInterface $transport): TransportInterface => $this->wrapResilience($transport), $candidates);
+        $finalTransport = count($wrapped) > 1 ? new FailoverTransport($wrapped) : $wrapped[0];
+
+        $mailer = new Mailer($finalTransport);
+        $pipeline = $mailer->getPipeline();
 
         if ($this->enableTelemetry) {
             $pipeline->pipe(new TelemetryMiddleware($this->logger));
@@ -115,5 +179,19 @@ final class MailerBuilder
         }
 
         return $mailer;
+    }
+
+    private function wrapResilience(TransportInterface $transport): TransportInterface
+    {
+        if ($this->rateLimiter !== null) {
+            $transport = new RateLimitedTransport($transport, $this->rateLimiter);
+        }
+
+        if ($this->retryConfig !== null) {
+            [$attempts, $baseDelayMs, $maxDelayMs] = $this->retryConfig;
+            $transport = new RetryTransport($transport, $attempts, $baseDelayMs, $maxDelayMs, $this->logger);
+        }
+
+        return $transport;
     }
 }

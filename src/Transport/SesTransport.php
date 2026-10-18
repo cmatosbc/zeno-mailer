@@ -70,12 +70,22 @@ final class SesTransport implements TransportInterface, SignableTransport
                 );
             }
 
+            // SES throttling arrives as HTTP 400 with a Throttling code - transient
+            $throttled = str_contains($response->getBody(), '<Code>Throttling</Code>');
+            $retryable = $throttled
+                || $response->getStatus() === 429
+                || $response->getStatus() === 408
+                || $response->getStatus() >= 500;
+
             return TransportResult::failure("SES API error: HTTP {$response->getStatus()}", [
                 'http_code' => $response->getStatus(),
                 'response' => $response->getBody(),
-            ]);
-        } catch (\Exception $e) {
+            ], $retryable);
+        } catch (\InvalidArgumentException $e) {
             return TransportResult::failure($e->getMessage());
+        } catch (\Exception $e) {
+            // Network-level errors (DNS, connect, timeout) are transient
+            return TransportResult::failure($e->getMessage(), [], true);
         }
     }
 

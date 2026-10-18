@@ -160,6 +160,60 @@ final class BrevoTransportTest extends TestCase
         }
     }
 
+    public function testTransientHttpErrorsAreMarkedRetryable(): void
+    {
+        $envelope = $this->envelope();
+
+        // 500, 429 -> retryable; 400 -> permanent
+        foreach ([[500, true], [429, true], [400, false]] as [$status, $expected]) {
+            $client = new MockHttpClient(new HttpResponse($status, '{"message": "boom"}'));
+            $transport = new BrevoTransport('key', [], $client);
+
+            $result = $transport->send($envelope);
+
+            self::assertFalse($result->isSuccess());
+            self::assertSame(
+                $expected,
+                $result->isRetryable(),
+                "HTTP {$status} retryable flag should be " . var_export($expected, true)
+            );
+        }
+
+        // Network-level errors are transient
+        $client = new MockHttpClient(new \RuntimeException('connection reset'));
+        $transport = new BrevoTransport('key', [], $client);
+        self::assertTrue($transport->send($envelope)->isRetryable());
+
+        // Validation errors are permanent
+        $client = new MockHttpClient();
+        $transport = new BrevoTransport('key', [], $client);
+        self::assertFalse($transport->send((new Envelope())->setTextBody('no from'))->isRetryable());
+    }
+
+    public function testUnnamedRecipientsOmitTheNameKey(): void
+    {
+        // Regression: Brevo rejects {"email": "...", "name": ""} with
+        // "name is missing in to" - the key must be omitted entirely.
+        $client = new MockHttpClient(new HttpResponse(200, '{"messageId": "m"}'));
+        $transport = new BrevoTransport('key', [], $client);
+
+        $transport->send(
+            (new Envelope())
+                ->setFrom('sender@example.com')
+                ->addTo('to@example.com')
+                ->addCc('cc@example.com')
+                ->addBcc('bcc@example.com')
+                ->setSubject('x')
+                ->setTextBody('y')
+        );
+
+        $payload = json_decode((string)$client->requests[0]['body'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([['email' => 'to@example.com']], $payload['to']);
+        self::assertSame([['email' => 'cc@example.com']], $payload['cc']);
+        self::assertSame([['email' => 'bcc@example.com']], $payload['bcc']);
+        self::assertArrayNotHasKey('replyTo', $payload);
+    }
+
     public function testSendBatchWithoutAsyncIsSequential(): void
     {
         $client = new MockHttpClient(

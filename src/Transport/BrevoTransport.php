@@ -75,12 +75,23 @@ final class BrevoTransport implements TransportInterface
             return TransportResult::failure("Brevo API error: {$errorMessage}", [
                 'http_code' => $response->getStatus(),
                 'response' => $responseData,
-            ]);
+            ], self::isRetryableHttpStatus($response->getStatus()));
         } catch (\JsonException $e) {
             return TransportResult::failure('Brevo payload encoding failed: ' . $e->getMessage());
-        } catch (\Exception $e) {
+        } catch (\InvalidArgumentException $e) {
             return TransportResult::failure($e->getMessage());
+        } catch (\Exception $e) {
+            // Network-level errors (DNS, connect, timeout) are transient
+            return TransportResult::failure($e->getMessage(), [], true);
         }
+    }
+
+    /**
+     * HTTP 408/429/5xx are transient; other 4xx are permanent.
+     */
+    private static function isRetryableHttpStatus(int $status): bool
+    {
+        return $status === 429 || $status === 408 || $status >= 500;
     }
 
     /**
@@ -202,33 +213,30 @@ final class BrevoTransport implements TransportInterface
 
         $payload = [
             'sender' => $sender,
-            'to' => array_map(static fn ($addr) => [
-                'email' => $addr->getEmail(),
-                'name' => $addr->getName(),
-            ], $envelope->getTo()),
+            // Brevo rejects empty-string names ("name is missing") - omit the key instead
+            'to' => array_map(static fn ($addr) => $addr->getName() !== ''
+                ? ['email' => $addr->getEmail(), 'name' => $addr->getName()]
+                : ['email' => $addr->getEmail()], $envelope->getTo()),
             'subject' => $envelope->getSubject(),
         ];
 
         if (!empty($envelope->getCc())) {
-            $payload['cc'] = array_map(static fn ($addr) => [
-                'email' => $addr->getEmail(),
-                'name' => $addr->getName(),
-            ], $envelope->getCc());
+            $payload['cc'] = array_map(static fn ($addr) => $addr->getName() !== ''
+                ? ['email' => $addr->getEmail(), 'name' => $addr->getName()]
+                : ['email' => $addr->getEmail()], $envelope->getCc());
         }
 
         if (!empty($envelope->getBcc())) {
-            $payload['bcc'] = array_map(static fn ($addr) => [
-                'email' => $addr->getEmail(),
-                'name' => $addr->getName(),
-            ], $envelope->getBcc());
+            $payload['bcc'] = array_map(static fn ($addr) => $addr->getName() !== ''
+                ? ['email' => $addr->getEmail(), 'name' => $addr->getName()]
+                : ['email' => $addr->getEmail()], $envelope->getBcc());
         }
 
         $replyTo = $envelope->getReplyTo();
         if ($replyTo !== null) {
-            $payload['replyTo'] = [
-                'email' => $replyTo->getEmail(),
-                'name' => $replyTo->getName(),
-            ];
+            $payload['replyTo'] = $replyTo->getName() !== ''
+                ? ['email' => $replyTo->getEmail(), 'name' => $replyTo->getName()]
+                : ['email' => $replyTo->getEmail()];
         }
 
         if ($envelope->getHtmlBody() !== '') {

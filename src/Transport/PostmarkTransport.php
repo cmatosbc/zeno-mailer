@@ -51,11 +51,14 @@ final class PostmarkTransport implements TransportInterface
             return TransportResult::failure("Postmark API error: {$errorMessage}", [
                 'http_code' => $response->getStatus(),
                 'response' => $responseData,
-            ]);
+            ], $response->getStatus() === 429 || $response->getStatus() === 408 || $response->getStatus() >= 500);
         } catch (\JsonException $e) {
             return TransportResult::failure('Postmark payload encoding failed: ' . $e->getMessage());
-        } catch (\Exception $e) {
+        } catch (\InvalidArgumentException $e) {
             return TransportResult::failure($e->getMessage());
+        } catch (\Exception $e) {
+            // Network-level errors (DNS, connect, timeout) are transient
+            return TransportResult::failure($e->getMessage(), [], true);
         }
     }
 

@@ -281,6 +281,12 @@ foreach ($results as $result) {
 - **Telemetry** - PSR-3 logging and monitoring
 - **Custom** - Easy to create your own
 
+### 🛡️ Resilience
+
+- **Auto-retry** - transient failures (SMTP 4xx, HTTP 429/5xx) retried with exponential backoff + jitter
+- **Rate limiting** - token bucket per transport (`withRateLimit(300, 'day')`)
+- **Failover** - backup transport chain (`withFailover($backup)`)
+
 ### 🔐 Deliverability
 
 - **DKIM signing** - RFC 6376, rsa-sha256, relaxed/relaxed (SMTP & SES)

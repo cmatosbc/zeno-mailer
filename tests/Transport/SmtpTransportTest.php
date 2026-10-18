@@ -427,6 +427,47 @@ final class SmtpTransportTest extends TestCase
         }
     }
 
+    public function testTransientSmtpReplyIsMarkedRetryable(): void
+    {
+        $server = new FakeSmtpServer('tempfail');
+
+        try {
+            $envelope = (new Envelope())
+                ->setFrom('sender@example.com')
+                ->addTo('bad@example.com')
+                ->setTextBody('hi');
+
+            $transport = new SmtpTransport('127.0.0.1', $server->port, false);
+            $result = $transport->send($envelope);
+
+            self::assertFalse($result->isSuccess());
+            self::assertStringContainsString('451', $result->getMessage());
+            self::assertTrue($result->isRetryable(), 'SMTP 4xx replies are transient and retryable');
+        } finally {
+            $server->stop();
+        }
+    }
+
+    public function testPermanentSmtpReplyIsNotRetryable(): void
+    {
+        $server = new FakeSmtpServer('reject_rcpt');
+
+        try {
+            $envelope = (new Envelope())
+                ->setFrom('sender@example.com')
+                ->addTo('bad@example.com')
+                ->setTextBody('hi');
+
+            $transport = new SmtpTransport('127.0.0.1', $server->port, false);
+            $result = $transport->send($envelope);
+
+            self::assertFalse($result->isSuccess());
+            self::assertFalse($result->isRetryable(), 'SMTP 5xx replies are permanent');
+        } finally {
+            $server->stop();
+        }
+    }
+
     private static function unstuff(string $raw): string
     {
         return preg_replace('/^\.\./m', '.', $raw) ?? $raw;

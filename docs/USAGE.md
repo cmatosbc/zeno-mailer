@@ -210,6 +210,19 @@ $mailer = MailerBuilder::create()
 - **No inline (CID) images** — the Brevo API doesn't support them; use hosted image URLs (explicit error otherwise)
 - `sendBatch(array $envelopes): TransportResult[]` — concurrent when `async=true`, sequential otherwise
 
+**Account requirements (verified against the live API):**
+
+| Requirement | What happens if missed |
+|---|---|
+| Key enabled (account active) | `API Key is not enabled` — Brevo deactivates inactive accounts; reactivate in the dashboard |
+| Your IP authorized | `unrecognised IP address <ip>` with the exact IP to add — whitelist it at app.brevo.com/security/authorised_ips. Residential IPs are dynamic: when your ISP changes the address, the error returns showing the new one |
+| Sender verified | `sender not verified` — verify the From address in Senders & IPs |
+| Recipient names non-empty | Brevo rejects `{"name": ""}` — ZenoMailer omits the `name` key automatically for unnamed recipients |
+
+API errors are surfaced verbatim in `TransportResult::getMessage()` (including Brevo's resolution URLs), with the full response in `getMetadata()['response']`.
+
+**Verified against the live API**: sync sends, concurrent async batch (~200ms/email), attachments, Reply-To, custom headers, unicode/emoji content, unnamed recipients, and the explicit inline-image rejection.
+
 ### 6.3 Postmark (`postmark://`)
 
 ```php
@@ -282,7 +295,52 @@ Credentials containing `@`, `:`, `/` or `%` must be URL-encoded (`rawurlencode()
 
 ---
 
-## 7. Middleware
+## 7. Resilience (Retry, Rate Limiting, Failover)
+
+Three composable layers make sending production-proof. Failures are classified structurally: SMTP 4xx replies, HTTP 429/408/5xx, SES throttling and network errors are **transient** (retryable); SMTP 5xx, HTTP 4xx and validation errors are **permanent**.
+
+### Retry with exponential backoff + jitter
+
+```php
+$mailer = MailerBuilder::create()
+    ->withDsn('smtp://user:pass@smtp.example.com:587?starttls=true')
+    ->withRetry(3)                    // up to 3 total attempts, 500ms base delay, 5s ceiling
+    ->withRetry(5, 200.0, 10000.0)    // or fully customized
+    ->build();
+```
+
+Each retry waits a random delay in `[0, min(maxDelay, baseDelay * 2^attempt)]` (full jitter, the pattern AWS recommends) so concurrent senders don't synchronize.
+
+### Rate limiting (token bucket)
+
+```php
+$mailer = MailerBuilder::create()
+    ->withDsn('brevo://API_KEY@default')
+    ->withRateLimit(300, 'day')       // Brevo free tier
+    ->withRateLimit(60)               // default period: minute
+    ->withRateLimit(10, 'second')     // or 'hour', or a float of seconds
+    ->build();
+```
+
+`send()` blocks until a token is available; the bucket starts full and refills continuously. Every retry attempt also consumes budget (rate limiting sits inside the retry layer).
+
+### Failover transport chain
+
+```php
+$mailer = MailerBuilder::create()
+    ->withDsn('smtp://user:pass@smtp.example.com:587?starttls=true')   // primary
+    ->withFailover(TransportFactory::fromDsn('brevo://API_KEY@default'))
+    ->withFailover(TransportFactory::fromDsn('postmark://TOKEN@default'))
+    ->build();
+```
+
+Candidates are tried in order; the first success wins. Each candidate gets the retry and rate-limit configuration, so the primary is fully exhausted (including retries) before switching. When all fail, the result carries every attempt's error in `getMetadata()['attempts']`.
+
+Notes:
+- DKIM applies to the primary transport only (failover backups send unsigned unless they are configured with DKIM directly)
+- The resilience layers wrap `send()`; Brevo's `sendBatch()` bypasses them (call it on the transport directly)
+
+## 8. Middleware
 
 Middleware wraps the pipeline: each middleware receives the Envelope, may modify it, and decides when to call the next handler.
 
@@ -319,7 +377,7 @@ Middleware runs in this order: **Telemetry → CSS Inliner → Dark Mode Guard �
 
 ---
 
-## 8. DKIM Signing
+## 9. DKIM Signing
 
 DKIM (RFC 6376) signs the message so receivers can verify it against your DNS. Supported by the SMTP and SES transports.
 
@@ -351,7 +409,7 @@ Technical details: rsa-sha256, relaxed/relaxed canonicalization, all message hea
 
 ---
 
-## 9. Internationalization
+## 10. Internationalization
 
 | Feature | Behavior |
 |---|---|
@@ -365,7 +423,7 @@ Transport support: SMTP ✓ · Brevo ✓ · Postmark ✓ · SES ✗ (no SMTPUTF8
 
 ---
 
-## 10. Error Handling
+## 11. Error Handling
 
 `send()` never throws for delivery problems — it returns a `TransportResult`:
 
@@ -384,7 +442,7 @@ Invalid envelopes (missing From, no recipients, empty body, header injection att
 
 ---
 
-## 11. Batch Sending
+## 12. Batch Sending
 
 ```php
 // SMTP: a loop reuses the connection automatically (keepalive)
@@ -399,7 +457,7 @@ $results = $mailer->getTransport()->sendBatch($envelopes);
 
 ---
 
-## 12. Testing Your Setup
+## 13. Testing Your Setup
 
 - **Postmark without an account**: use the `POSTMARK_API_TEST` server token — the real API simulates the send
 - **Local SMTP testing**: run a fake SMTP server (the test suite ships one in `tests/Integration/`) or use smtp4dev / MailHog
@@ -409,12 +467,14 @@ $results = $mailer->getTransport()->sendBatch($envelopes);
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 | Symptom | Cause & fix |
 |---|---|
 | `550 5.7.30 ... DKIM authentication didn't pass` | DKIM signature present but not verifiable (DNS record missing). Publish the key or remove `withDkim()` — a failing signature is worse than none |
 | `Brevo API error: API Key is not enabled` | Key revoked or Brevo account deactivated (inactivity). Regenerate in the dashboard |
+| `Brevo API error: unrecognised IP address ...` | Whitelist your current IP at app.brevo.com/security/authorised_ips (both IPv4 and IPv6); residential IPs change over time |
+| `Brevo API error: name is missing in to` | Fixed in ZenoMailer (empty names are omitted) — if you still see it, update your version |
 | `sender not verified` (Brevo/Postmark/SES) | Verify the From address in the provider's dashboard first |
 | `SMTP server does not advertise STARTTLS support` | Server can't do TLS — remove `starttls=true` or fix the server |
 | `Envelope contains internationalized addresses ... does not advertise SMTPUTF8` | Server lacks RFC 6531 support; use ASCII local parts or a modern provider |
@@ -424,7 +484,7 @@ $results = $mailer->getTransport()->sendBatch($envelopes);
 
 ---
 
-## 14. Security Notes
+## 15. Security Notes
 
 - All header values (subjects, names, custom headers, filenames) are validated and encoded — CRLF header injection is rejected at the boundary
 - Bcc recipients never appear in message headers
@@ -434,6 +494,6 @@ $results = $mailer->getTransport()->sendBatch($envelopes);
 
 ---
 
-## 15. Coming from PHPMailer?
+## 16. Coming from PHPMailer?
 
 See the [Migration Guide](../MIGRATION.md) for side-by-side examples of every common task.
