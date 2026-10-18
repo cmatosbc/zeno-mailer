@@ -1,0 +1,51 @@
+{
+    "name": "zenomailer/zenomailer",
+    "type": "library",
+    "description": "ZenoMailer - Modern PHP 8.1+ email library with decoupled architecture, middleware pipeline, and multiple transport layers (SMTP, HTTP APIs, JMAP)",
+    "keywords": ["email", "mail", "mailer", "smtp", "brevo", "postmark", "ses", "jmap", "middleware", "php8"],
+    "authors": [
+        {
+            "name": "Carlos Matos",
+            "email": "carlosmatos552@gmail.com"
+        }
+    ],
+    "config": {
+        "lock": false
+    },
+    "require": {
+        "php": ">=8.1.0",
+        "ext-ctype": "*",
+        "ext-filter": "*",
+        "ext-hash": "*",
+        "ext-curl": "*",
+        "psr/log": "^3.0"
+    },
+    "require-dev": {
+        "phpmailer/phpmailer": "^6.9",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^12.0"
+    },
+    "suggest": {
+        "ext-mbstring": "Needed to send email in multibyte encoding charset or decode encoded addresses",
+        "ext-openssl": "Needed for secure SMTP sending (STARTTLS and implicit TLS)",
+        "monolog/monolog": "Recommended PSR-3 logger implementation"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "autoload": {
+        "psr-4": {
+            "ZenoMailer\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "ZenoMailer\\Tests\\": "tests/"
+        }
+    },
+    "license": "MIT",
+    "scripts": {
+        "benchmark": "php benchmark-brevo.php",
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G"
+    }
+}

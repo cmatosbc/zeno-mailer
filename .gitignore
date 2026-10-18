@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Private keys (DKIM keys, certificates)
+*.pem
+*.key
+
+# Composer
+vendor/
+composer.lock
+
+# Test artifacts
+.phpunit.result.cache
+.phpunit.cache/
+
+# Tooling caches
+.phpcs-cache
+.phpcs.xml
+phpcs.xml
