@@ -42,7 +42,16 @@ final class CurlHttpClient implements HttpClientInterface
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_TIMEOUT => (int)($options['timeout'] ?? $this->timeout),
             CURLOPT_CONNECTTIMEOUT => $this->connectTimeout,
+            // Session discovery endpoints may redirect (e.g. Stalwart's
+            // /.well-known/jmap -> /jmap/session)
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 5,
         ];
+
+        if (isset($options['verify_tls']) && !filter_var($options['verify_tls'], FILTER_VALIDATE_BOOLEAN)) {
+            $settings[CURLOPT_SSL_VERIFYPEER] = false;
+            $settings[CURLOPT_SSL_VERIFYHOST] = 0;
+        }
 
         if ($isPost) {
             $settings[CURLOPT_POST] = true;

@@ -70,7 +70,7 @@ Notes: HTTP API transports avoid the per-message SMTP round trips entirely; the 
 | Structure | 5,500-line god class: message building, MIME, SMTP client, DKIM, validation, error state in one mutable object | Envelope (data) / Middleware (processing) / Transport (delivery), each independently testable |
 | Typing | PHP 5.5-era patterns, broad mutable public surface | `strict_types`, `final` classes, `readonly`, `match`, constructor promotion |
 | Static analysis | (its own tooling) | PHPStan level 8: zero errors |
-| Test suite | extensive, mature | 159 tests / 638 assertions, including **fake SMTP and HTTP servers** that verify full protocol transcripts, dot-stuffing round-trips, and a cryptographically independent DKIM verifier |
+| Test suite | extensive, mature | 189 tests / 1653 assertions, including **fake SMTP and HTTP servers** that verify full protocol transcripts, dot-stuffing round-trips, and a cryptographically independent DKIM verifier |
 | Known-answer crypto tests | — | SigV4 verified byte-for-byte against AWS's official test suite |
 
 ---
@@ -80,10 +80,10 @@ Notes: HTTP API transports avoid the per-message SMTP round trips entirely; the 
 | Transport | Verified against |
 |---|---|
 | SMTP | Live Gmail (smtp.gmail.com:587, STARTTLS, AUTH PLAIN): basic sends, connection reuse, all middlewares, embedded images, attachments, RFC 2047/QP internationalization, SMTPUTF8 negotiation |
-| Postmark | Live API via the official `POSTMARK_API_TEST` token: acceptance + genuine MessageID; error path with real API error messages |
+| Postmark | Live API via the official `POSTMARK_API_TEST` token: attachments, embedded images (ContentID), emoji content, tracking options (caught and fixed the PascalCase `TrackLinks` requirement); error paths with real API error messages |
 | Brevo | Live API: request/response/error handling exercised (test key disabled — the transport surfaced the provider's exact error) |
 | SES | SigV4 proven against AWS's official test-suite vector; payload format per AWS docs; live send pending credentials |
-| JMAP | Protocol logic fully mocked (session discovery, caching, backreference submission); live send pending a server (Fastmail or self-hosted Stalwart) |
+| JMAP | **Live against a local Stalwart server**: full send loop (session discovery, Drafts mailbox lookup by role, identity resolution, draft creation, submission) with receipt verified by querying the mailbox back; live testing caught and fixed five real bugs (DSN scheme/port, redirect following, relative apiUrl, server-assigned mailbox ids, submission capability/identity) |
 
 One production lesson was learned the hard way and turned into a feature: a DKIM signature whose DNS record doesn't exist is **worse than no signature** — Gmail hard-rejects with `550 5.7.30`. ZenoMailer's `verify_dns` option refuses to sign until the key is published; PHPMailer has no equivalent guard.
 

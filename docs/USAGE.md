@@ -234,7 +234,7 @@ $mailer = MailerBuilder::create()
 | Option | Default | Meaning |
 |---|---|---|
 | `track_opens` | unset | Open tracking (boolean) |
-| `track_links` | unset | Link tracking: `none`, `text_and_html`, `html_only`, `text_only` |
+| `track_links` | unset | Link tracking: `None`, `HtmlAndText`, `HtmlOnly`, `TextOnly` (any casing accepted, normalized) |
 | `message_stream` | unset | Message stream id |
 | `timeout` | `30` | Request timeout |
 
@@ -261,7 +261,7 @@ $mailer = MailerBuilder::create()
 - Max 50 recipients per message (AWS limit)
 - The From address must be a **verified identity** in your SES account; sandbox accounts can only send to verified recipients
 
-### 6.5 JMAP (`jmap://`)
+### 6.5 JMAP (`jmap://`, `jmap+http://`)
 
 ```php
 $mailer = MailerBuilder::create()
@@ -269,16 +269,21 @@ $mailer = MailerBuilder::create()
     ->build();
 ```
 
+The scheme `jmap://` implies HTTPS; use `jmap+http://` for plain-HTTP servers (local testing).
+
 | Option | Default | Meaning |
 |---|---|---|
 | `auth` | `bearer` | `bearer` (API token) or `basic` (username:password, for self-hosted servers) |
-| `drafts_mailbox` | `drafts` | Mailbox id where the draft is created before submission |
+| `account_id` | auto | Pin the JMAP account id (with `auth=basic` the DSN user part is the login username, so the account id always auto-discovers unless pinned here) |
+| `drafts_mailbox_id` | auto | Server-assigned mailbox id for the draft; by default the Drafts mailbox is looked up by role (and created on first use) |
+| `api_url` | from session | Override the submission endpoint (reverse proxies, testing) |
 | `timeout` | `30` | Request timeout |
 
-- The **account id is auto-discovered** from the server's session (primary mail account) — pass it in the DSN user part only if you want to pin it
-- Session discovery (`/.well-known/jmap`) is cached per transport instance
+- The **account id is auto-discovered** from the session's primary mail account (server-assigned ids like Fastmail's are opaque)
+- Session discovery (`/.well-known/jmap`, following redirects) is cached per transport instance, as are the mailbox and identity lookups
+- The send flow: `Mailbox/query` (Drafts by role) → `Identity/get` (match the From address, create one if missing) → `Email/set` (draft) → `EmailSubmission/set` (concrete ids — more compatible across servers than backreferences)
 - **No attachments yet** (requires JMAP blob upload) — explicit error
-- The draft is created and then submitted via `EmailSubmission/set` using a backreference
+- **Verified live** against a local Stalwart server: full send loop including auto-provisioning of the Drafts mailbox and identity
 
 ### 6.6 DSN Quick Reference
 
@@ -288,7 +293,7 @@ smtps://[user:pass@]host[:port][?options]       port 465, implicit TLS
 brevo://API_KEY@default[?async=true]            (sendinblue:// alias)
 postmark://SERVER_TOKEN@default[?options]
 ses://KEY:SECRET@default[?region=...]           URL-encode special characters
-jmap://[accountId:]token@host[?auth=basic]
+jmap://[accountId:]token@host[?auth=basic]        (jmap+http:// for plain HTTP)
 ```
 
 Credentials containing `@`, `:`, `/` or `%` must be URL-encoded (`rawurlencode()`).
@@ -431,7 +436,8 @@ Transport support: SMTP ✓ · Brevo ✓ · Postmark ✓ · SES ✗ (no SMTPUTF8
 $result->isSuccess();
 $result->getMessage();      // human-readable outcome or error
 $result->getMessageId();    // server/transport message id, or null
-$result->getMetadata();     // array: http_code, response, host, port, reused_connection, ...
+$result->getMetadata();     // array: http_code, response, host, port, reused_connection, attempts, ...
+$result->isRetryable();     // true for transient failures (SMTP 4xx, HTTP 429/5xx, network errors)
 ```
 
 What DOES throw (before any network I/O):
@@ -461,6 +467,7 @@ $results = $mailer->getTransport()->sendBatch($envelopes);
 
 - **Postmark without an account**: use the `POSTMARK_API_TEST` server token — the real API simulates the send
 - **Local SMTP testing**: run a fake SMTP server (the test suite ships one in `tests/Integration/`) or use smtp4dev / MailHog
+- **Local JMAP testing**: run [Stalwart](https://stalw.art) in Docker and connect with `jmap+http://user:pass@127.0.0.1:8080?auth=basic`
 - **Deliverability audit**: send to an address at [aboutmy.email](https://aboutmy.email) for a full SPF/DKIM/DMARC report
 - **Gmail check**: send to a Gmail address → ⋮ → *Show original* → verify `SPF: PASS`, `DKIM: PASS`
 - **Unit-testing your own code**: transports accept an injected `HttpClientInterface` — mock HTTP without network
@@ -479,6 +486,7 @@ $results = $mailer->getTransport()->sendBatch($envelopes);
 | `SMTP server does not advertise STARTTLS support` | Server can't do TLS — remove `starttls=true` or fix the server |
 | `Envelope contains internationalized addresses ... does not advertise SMTPUTF8` | Server lacks RFC 6531 support; use ASCII local parts or a modern provider |
 | `Amazon SES does not support SMTPUTF8` | SES limitation — use ASCII local parts |
+| `Failed to get JMAP session: HTTP 401` | Wrong credentials or wrong `auth` scheme (self-hosted servers usually need `auth=basic`) |
 | `Header ... is managed by the serializer` | You tried to override a structural header via `addHeader()` — use the dedicated Envelope methods |
 | `Invalid envelope: ...` in the result | Envelope validation failed (missing From/recipients/body) — check the message |
 

@@ -135,7 +135,7 @@ final class PostmarkTransport implements TransportInterface
         }
 
         if (isset($this->options['track_links'])) {
-            $payload['TrackLinks'] = $this->options['track_links'];
+            $payload['TrackLinks'] = $this->normalizeTrackLinks((string)$this->options['track_links']);
         }
 
         if (isset($this->options['message_stream'])) {
@@ -143,6 +143,24 @@ final class PostmarkTransport implements TransportInterface
         }
 
         return $payload;
+    }
+
+    /**
+     * Postmark requires PascalCase values (verified live: 'text_and_html' is
+     * rejected with "Valid options are: null, 'None', 'HtmlAndText',
+     * 'HtmlOnly', 'TextOnly'"). Accepts any casing and normalizes.
+     */
+    private function normalizeTrackLinks(string $value): string
+    {
+        return match (strtolower(str_replace(['-', '_'], '', $value))) {
+            'none' => 'None',
+            'htmlandtext', 'textandhtml' => 'HtmlAndText',
+            'htmlonly' => 'HtmlOnly',
+            'textonly' => 'TextOnly',
+            default => throw new \InvalidArgumentException(
+                "Invalid track_links value: {$value} (valid: None, HtmlAndText, HtmlOnly, TextOnly)"
+            ),
+        };
     }
 
     /**

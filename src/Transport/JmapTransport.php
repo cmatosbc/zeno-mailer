@@ -13,12 +13,16 @@ final class JmapTransport implements TransportInterface
 {
     private string $host;
     private string $accountId;
+    private string $authScheme;
     private string $apiToken;
     /** @var array<string, mixed> */
     private array $options;
     private HttpClientInterface $http;
     /** @var array<string, mixed>|null */
     private ?array $session = null;
+    private ?string $draftsMailboxId = null;
+    /** @var array<string, string> */
+    private array $identityIds = [];
 
     /**
      * @param array<string, mixed> $options
@@ -30,11 +34,30 @@ final class JmapTransport implements TransportInterface
         array $options = [],
         ?HttpClientInterface $httpClient = null
     ) {
-        $this->host = $host;
+        $this->host = str_starts_with($host, 'http://') || str_starts_with($host, 'https://')
+            ? $host
+            : 'https://' . $host;
         $this->accountId = $accountId;
+        $this->authScheme = ($options['auth'] ?? 'bearer') === 'basic' ? 'basic' : 'bearer';
         $this->apiToken = $apiToken;
         $this->options = $options;
         $this->http = $httpClient ?? new CurlHttpClient((int)($options['timeout'] ?? 30));
+    }
+
+    /**
+     * JMAP session objects may return relative URLs (e.g. Stalwart's
+     * apiUrl "/jmap/") - resolve them against the session host.
+     */
+    private function resolveUrl(string $url): string
+    {
+        if ($url !== '' && !str_starts_with($url, 'http://') && !str_starts_with($url, 'https://')) {
+            $parts = parse_url($this->host);
+            $origin = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . (isset($parts['port']) ? ':' . $parts['port'] : '');
+
+            return $origin . '/' . ltrim($url, '/');
+        }
+
+        return $url;
     }
 
     /**
@@ -44,7 +67,7 @@ final class JmapTransport implements TransportInterface
      */
     private function authHeader(): string
     {
-        if (($this->options['auth'] ?? 'bearer') === 'basic') {
+        if ($this->authScheme === 'basic') {
             return 'Authorization: Basic ' . base64_encode($this->accountId . ':' . $this->apiToken);
         }
 
@@ -61,34 +84,28 @@ final class JmapTransport implements TransportInterface
             }
 
             $session = $this->getSession();
-            $emailSubmissionUrl = $session['apiUrl']
+            $apiUrl = $this->options['api_url'] ?? $session['apiUrl']
                 ?? throw new \RuntimeException('Invalid JMAP session response: missing apiUrl');
-
-            $payload = json_encode($this->buildJmapPayload($envelope, $session), JSON_THROW_ON_ERROR);
-
-            $response = $this->http->post(
-                $emailSubmissionUrl,
-                ['Content-Type: application/json', $this->authHeader()],
-                $payload,
-                $this->httpOptions()
-            );
-
-            if ($response->getStatus() < 200 || $response->getStatus() >= 300) {
-                $responseData = $response->getJson();
-                $errorMessage = is_array($responseData) ? ($responseData['type'] ?? null) : null;
-                $errorMessage ??= mb_substr(trim($response->getBody()), 0, 200) ?: 'Unknown error';
-
-                $retryable = $response->getStatus() === 429
-                    || $response->getStatus() === 408
-                    || $response->getStatus() >= 500;
-
-                return TransportResult::failure("JMAP error: {$errorMessage}", [
-                    'http_code' => $response->getStatus(),
-                    'response' => $responseData,
-                ], $retryable);
+            $apiUrl = $this->resolveUrl((string)$apiUrl);
+            $accountId = $this->resolveAccountId($session);
+            $draftsMailboxId = $this->resolveDraftsMailboxId($accountId, $apiUrl);
+            $from = $envelope->getFrom();
+            if ($from === null) {
+                throw new \InvalidArgumentException('Envelope must have a From address (call setFrom())');
             }
+            $identityId = $this->resolveIdentityId($accountId, $apiUrl, $from->getEmail(), $from->getName());
 
-            return $this->interpretSubmissionResponse($response);
+            // Step 1: create the draft email
+            $createPayload = json_encode($this->buildEmailCreatePayload($envelope, $accountId, $draftsMailboxId), JSON_THROW_ON_ERROR);
+            $createResponse = $this->postJmap($apiUrl, $createPayload);
+            $draftId = $this->extractCreatedId($createResponse, 'Email/set');
+
+            // Step 2: submit it with a concrete emailId (more compatible across
+            // servers than a same-request backreference)
+            $submissionPayload = json_encode($this->buildSubmissionPayload($accountId, $draftId, $envelope, $identityId), JSON_THROW_ON_ERROR);
+            $submissionResponse = $this->postJmap($apiUrl, $submissionPayload);
+
+            return $this->interpretSubmissionResponse($submissionResponse);
         } catch (\JsonException $e) {
             return TransportResult::failure('JMAP payload encoding failed: ' . $e->getMessage());
         } catch (\InvalidArgumentException $e) {
@@ -97,6 +114,70 @@ final class JmapTransport implements TransportInterface
             // Network-level errors (DNS, connect, timeout) are transient
             return TransportResult::failure($e->getMessage(), [], true);
         }
+    }
+
+    private function postJmap(string $apiUrl, string $payload): \ZenoMailer\Http\HttpResponse
+    {
+        $response = $this->http->post($apiUrl, ['Content-Type: application/json', $this->authHeader()], $payload, $this->httpOptions());
+
+        if ($response->getStatus() < 200 || $response->getStatus() >= 300) {
+            $responseData = $response->getJson();
+            $errorMessage = is_array($responseData) ? ($responseData['type'] ?? null) : null;
+            $errorMessage ??= mb_substr(trim($response->getBody()), 0, 200) ?: 'Unknown error';
+
+            $retryable = $response->getStatus() === 429
+                || $response->getStatus() === 408
+                || $response->getStatus() >= 500;
+
+            throw new JmapServerException("JMAP error: {$errorMessage}", [
+                'http_code' => $response->getStatus(),
+                'response' => $responseData,
+            ], $retryable);
+        }
+
+        return $response;
+    }
+
+    /**
+     * Extract the created object id from a Foo/set response; maps
+     * notCreated entries to a JMAPServerException.
+     *
+     * @return string The created object id
+     */
+    private function extractCreatedId(\ZenoMailer\Http\HttpResponse $response, string $method): string
+    {
+        $responseData = $response->getJson();
+        $methodResponses = is_array($responseData) ? ($responseData['methodResponses'] ?? []) : [];
+
+        foreach (is_array($methodResponses) ? $methodResponses : [] as $methodResponse) {
+            if (!is_array($methodResponse) || ($methodResponse[0] ?? null) !== $method) {
+                continue;
+            }
+
+            $arguments = $methodResponse[1] ?? [];
+            if (!is_array($arguments)) {
+                continue;
+            }
+
+            $notCreated = $arguments['notCreated'] ?? [];
+            if (is_array($notCreated) && $notCreated !== []) {
+                $first = reset($notCreated);
+                $description = is_array($first) ? ($first['description'] ?? 'rejected') : 'rejected';
+
+                throw new JmapServerException("JMAP error: {$description}", ['response' => $responseData]);
+            }
+
+            $created = $arguments['created'] ?? [];
+            if (is_array($created)) {
+                foreach ($created as $entry) {
+                    if (is_array($entry) && isset($entry['id']) && is_string($entry['id'])) {
+                        return $entry['id'];
+                    }
+                }
+            }
+        }
+
+        throw new JmapServerException("JMAP error: no {$method} response found", ['response' => $responseData]);
     }
 
     /**
@@ -175,7 +256,7 @@ final class JmapTransport implements TransportInterface
             }
         }
 
-        return TransportResult::failure('JMAP error: no EmailSubmission/set response found', [
+        throw new JmapServerException('JMAP error: no EmailSubmission/set response found', [
             'http_code' => $response->getStatus(),
             'response' => $responseData,
         ]);
@@ -190,7 +271,15 @@ final class JmapTransport implements TransportInterface
      */
     private function resolveAccountId(array $session): string
     {
-        if ($this->accountId !== '') {
+        // With basic auth the DSN user part is the login username, not the
+        // JMAP account id - the account id always auto-discovers (or comes
+        // from the explicit account_id option).
+        $explicit = $this->options['account_id'] ?? null;
+        if (is_string($explicit) && $explicit !== '') {
+            return $explicit;
+        }
+
+        if ($this->authScheme !== 'basic' && $this->accountId !== '') {
             return $this->accountId;
         }
 
@@ -209,22 +298,125 @@ final class JmapTransport implements TransportInterface
         }
 
         throw new \RuntimeException(
-            'No JMAP account id available - pass it in the DSN user part or ensure the session exposes primaryAccounts'
+            'No JMAP account id available - pass it via the account_id option or ensure the session exposes primaryAccounts'
         );
     }
 
     /**
-     * @param array<string, mixed> $session
+     * JMAP mailbox ids are server-assigned, so the Drafts mailbox must be
+     * looked up by role (and created on first use). An explicit
+     * drafts_mailbox_id option bypasses the lookup.
+     */
+    private function resolveDraftsMailboxId(string $accountId, string $apiUrl): string
+    {
+        $explicit = $this->options['drafts_mailbox_id'] ?? null;
+        if (is_string($explicit) && $explicit !== '') {
+            return $explicit;
+        }
+
+        if ($this->draftsMailboxId !== null) {
+            return $this->draftsMailboxId;
+        }
+
+        $query = json_encode([
+            'using' => ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+            'methodCalls' => [
+                ['Mailbox/query', [
+                    'accountId' => $accountId,
+                    'filter' => ['role' => 'drafts'],
+                    'limit' => 1,
+                ], 'm0'],
+            ],
+        ], JSON_THROW_ON_ERROR);
+
+        $responseData = $this->postJmap($apiUrl, $query)->getJson();
+        $methodResponse = is_array($responseData) ? ($responseData['methodResponses'][0] ?? null) : null;
+        $arguments = is_array($methodResponse) ? ($methodResponse[1] ?? []) : [];
+        $ids = is_array($arguments) ? ($arguments['ids'] ?? []) : [];
+
+        if (is_array($ids) && $ids !== [] && is_string($ids[0])) {
+            $this->draftsMailboxId = $ids[0];
+
+            return $this->draftsMailboxId;
+        }
+
+        // No Drafts mailbox yet - create one
+        $create = json_encode([
+            'using' => ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+            'methodCalls' => [
+                ['Mailbox/set', [
+                    'accountId' => $accountId,
+                    'create' => ['drafts' => ['name' => 'Drafts', 'role' => 'drafts']],
+                ], 'm0'],
+            ],
+        ], JSON_THROW_ON_ERROR);
+
+        $this->draftsMailboxId = $this->extractCreatedId($this->postJmap($apiUrl, $create), 'Mailbox/set');
+
+        return $this->draftsMailboxId;
+    }
+
+    /**
+     * Resolve the JMAP identity to submit as: match the From address among
+     * the account's identities, creating one on first use. Cached per address.
+     */
+    private function resolveIdentityId(string $accountId, string $apiUrl, string $email, string $name): string
+    {
+        if (isset($this->identityIds[$email])) {
+            return $this->identityIds[$email];
+        }
+
+        $get = json_encode([
+            'using' => ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:submission'],
+            'methodCalls' => [
+                ['Identity/get', ['accountId' => $accountId], 'm0'],
+            ],
+        ], JSON_THROW_ON_ERROR);
+
+        $responseData = $this->postJmap($apiUrl, $get)->getJson();
+        $methodResponse = is_array($responseData) ? ($responseData['methodResponses'][0] ?? null) : null;
+        $arguments = is_array($methodResponse) ? ($methodResponse[1] ?? []) : [];
+        $list = is_array($arguments) ? ($arguments['list'] ?? []) : [];
+
+        if (is_array($list)) {
+            foreach ($list as $identity) {
+                if (is_array($identity) && ($identity['email'] ?? null) === $email && isset($identity['id']) && is_string($identity['id'])) {
+                    $this->identityIds[$email] = $identity['id'];
+
+                    return $identity['id'];
+                }
+            }
+        }
+
+        // No identity for this address yet - create one
+        $create = json_encode([
+            'using' => ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:submission'],
+            'methodCalls' => [
+                ['Identity/set', [
+                    'accountId' => $accountId,
+                    'create' => ['identity' => ['name' => $name, 'email' => $email]],
+                ], 'm0'],
+            ],
+        ], JSON_THROW_ON_ERROR);
+
+        $this->identityIds[$email] = $this->extractCreatedId($this->postJmap($apiUrl, $create), 'Identity/set');
+
+        return $this->identityIds[$email];
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function buildJmapPayload(Envelope $envelope, array $session): array
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildEmailCreatePayload(Envelope $envelope, string $accountId, string $draftsMailboxId): array
     {
         $from = $envelope->getFrom();
         if ($from === null) {
             throw new \InvalidArgumentException('Envelope must have a From address (call setFrom())');
         }
 
-        $accountId = $this->resolveAccountId($session);
         $emailId = 'draft-' . bin2hex(random_bytes(8));
 
         return [
@@ -236,7 +428,7 @@ final class JmapTransport implements TransportInterface
                         'accountId' => $accountId,
                         'create' => [
                             $emailId => [
-                                'mailboxIds' => [$this->options['drafts_mailbox'] ?? 'drafts' => true],
+                                'mailboxIds' => [$draftsMailboxId => true],
                                 'from' => [
                                     [
                                         'email' => $from->getEmail(),
@@ -281,13 +473,31 @@ final class JmapTransport implements TransportInterface
                     ],
                     'c0',
                 ],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildSubmissionPayload(string $accountId, string $draftId, Envelope $envelope, string $identityId): array
+    {
+        $from = $envelope->getFrom();
+        if ($from === null) {
+            throw new \InvalidArgumentException('Envelope must have a From address (call setFrom())');
+        }
+
+        return [
+            'using' => ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:submission'],
+            'methodCalls' => [
                 [
                     'EmailSubmission/set',
                     [
                         'accountId' => $accountId,
                         'create' => [
                             'submission-1' => [
-                                'emailId' => '#' . $emailId,
+                                'identityId' => $identityId,
+                                'emailId' => $draftId,
                                 'envelope' => [
                                     'mailFrom' => [
                                         'email' => $from->getEmail(),
@@ -299,7 +509,7 @@ final class JmapTransport implements TransportInterface
                             ],
                         ],
                     ],
-                    'c1',
+                    'c0',
                 ],
             ],
         ];

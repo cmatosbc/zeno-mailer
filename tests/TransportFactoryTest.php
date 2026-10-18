@@ -88,6 +88,29 @@ final class TransportFactoryTest extends TestCase
         self::assertInstanceOf(JmapTransport::class, $transport);
     }
 
+    public function testJmapDsnBuildsHttpsUrlWithPort(): void
+    {
+        // Regression: the DSN must produce a scheme + port for the session URL
+        $transport = TransportFactory::fromDsn('jmap://account:token@127.0.0.1:8080');
+
+        self::assertInstanceOf(JmapTransport::class, $transport);
+
+        $host = (new \ReflectionProperty($transport, 'host'));
+        $host->setAccessible(true);
+        self::assertSame('https://127.0.0.1:8080', $host->getValue($transport));
+    }
+
+    public function testJmapPlusHttpSchemeBuildsHttpUrl(): void
+    {
+        $transport = TransportFactory::fromDsn('jmap+http://account:token@127.0.0.1:8080');
+
+        self::assertInstanceOf(JmapTransport::class, $transport);
+
+        $host = new \ReflectionProperty($transport, 'host');
+        $host->setAccessible(true);
+        self::assertSame('http://127.0.0.1:8080', $host->getValue($transport));
+    }
+
     public function testJmapWithoutTokenFails(): void
     {
         $this->expectException(\InvalidArgumentException::class);

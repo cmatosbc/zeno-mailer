@@ -19,6 +19,7 @@ Traditional email libraries are monolithic. ZenoMailer embraces **modern PHP arc
 - **Multiple Transports** - SMTP, HTTP APIs (Brevo, Postmark, SES), JMAP - all via simple DSN strings
 - **Type-Safe** - Full PHP 8.1+ type declarations with strict mode
 - **Performance** - HTTP APIs are 2-5x faster than SMTP; SMTP batches get ~2x more from connection reuse (measured)
+- **Live-Verified** - every transport exercised against real providers (Gmail, Brevo, Postmark, Stalwart); every failure hit in testing became a tested, documented behavior
 
 ## Quick Start
 

@@ -48,8 +48,10 @@ final class TransportFactory
                 (string)($options['region'] ?? 'us-east-1'),
                 $options
             ),
-            'jmap' => new JmapTransport(
-                $host,
+            'jmap', 'jmap+http' => new JmapTransport(
+                ($scheme === 'jmap+http' ? 'http://' : 'https://')
+                    . $host
+                    . ($port !== null ? ':' . $port : ''),
                 $user ?? '',
                 $pass ?? throw new \InvalidArgumentException("JMAP requires the API token in the DSN password part: {$dsn}"),
                 $options

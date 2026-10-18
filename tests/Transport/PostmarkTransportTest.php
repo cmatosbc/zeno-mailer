@@ -103,6 +103,27 @@ final class PostmarkTransportTest extends TestCase
         }
     }
 
+    public function testTrackLinksValuesAreNormalizedToPascalCase(): void
+    {
+        // Regression: Postmark rejects lowercase values ("Valid options are:
+        // null, 'None', 'HtmlAndText', 'HtmlOnly', 'TextOnly'")
+        foreach (['text_and_html' => 'HtmlAndText', 'HtmlAndText' => 'HtmlAndText', 'none' => 'None', 'TEXT-ONLY' => 'TextOnly'] as $input => $expected) {
+            $client = new MockHttpClient(new HttpResponse(200, '{"MessageID": "m"}'));
+            $transport = new PostmarkTransport('token', ['track_links' => $input], $client);
+
+            $transport->send($this->envelope());
+
+            $payload = json_decode((string)$client->requests[0]['body'], true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame($expected, $payload['TrackLinks'], "track_links '{$input}' should normalize to '{$expected}'");
+        }
+
+        // Invalid values become failure results (the transport catches validation errors)
+        $result = (new PostmarkTransport('token', ['track_links' => 'everything'], new MockHttpClient()))
+            ->send($this->envelope());
+        self::assertFalse($result->isSuccess());
+        self::assertStringContainsString('Invalid track_links value', $result->getMessage());
+    }
+
     public function testApiErrorReturnsFailure(): void
     {
         $client = new MockHttpClient(new HttpResponse(422, '{"Message": "Invalid email"}'));

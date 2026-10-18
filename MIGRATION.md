@@ -131,6 +131,7 @@ PHPMailer throws exceptions for everything and keeps the last error in `->ErrorI
 
 - **HTTP API transports**: Brevo, Postmark, Amazon SES, JMAP — one identical API for all
 - **Concurrent batch sending**: Brevo `sendBatch()` with `async=true` runs requests in parallel via curl_multi (measured ~5x faster than sequential)
+- **Resilience**: auto-retry with exponential backoff + jitter for transient failures, per-transport rate limiting (token bucket), and failover transport chains — none of which PHPMailer offers
 - **Connection reuse by default**: SMTP sends after the first skip connect/TLS/auth (~2x faster batches, measured against Gmail)
 - **Middleware pipeline**: composable processing (CSS inlining, dark mode guard, PSR-3 telemetry, your own)
 - **DKIM with a safety guard**: `verify_dns` refuses to sign until the public key is published — an unverifiable signature is worse than none (Gmail hard-rejects with `550 5.7.30`)
