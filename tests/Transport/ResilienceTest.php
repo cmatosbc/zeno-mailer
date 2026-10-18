@@ -38,6 +38,8 @@ final class ResilienceTest extends TestCase
             {
             }
 
+            use \ZenoMailer\Transport\SequentialBatchSending;
+
             public function send(Envelope $envelope): TransportResult
             {
                 $index = min($this->attempts, count($this->script) - 1);
@@ -107,6 +109,8 @@ final class ResilienceTest extends TestCase
     public function testBackoffDelayStaysWithinJitterBounds(): void
     {
         $retry = new RetryTransport(new class () implements TransportInterface {
+            use \ZenoMailer\Transport\SequentialBatchSending;
+
             public function send(Envelope $envelope): TransportResult
             {
                 return TransportResult::failure('x');

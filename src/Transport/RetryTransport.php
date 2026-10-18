@@ -12,8 +12,10 @@ use Psr\Log\NullLogger;
  * Retries transient failures (as classified by TransportResult::isRetryable())
  * with exponential backoff and full jitter.
  */
-final class RetryTransport implements TransportInterface
+final class RetryTransport implements TransportInterface, ClosableTransport
 {
+    use SequentialBatchSending;
+
     private LoggerInterface $logger;
 
     public function __construct(
@@ -28,6 +30,13 @@ final class RetryTransport implements TransportInterface
         }
 
         $this->logger = $logger ?? new NullLogger();
+    }
+
+    public function disconnect(): void
+    {
+        if ($this->inner instanceof ClosableTransport) {
+            $this->inner->disconnect();
+        }
     }
 
     public function send(Envelope $envelope): TransportResult

@@ -1,6 +1,6 @@
 # ZenoMailer
 
-**Modern PHP 8.1+ email library with decoupled architecture**
+**Modern PHP 8.2+ email library with decoupled architecture**
 
 [![Latest Version](https://img.shields.io/packagist/v/zenomailer/zenomailer.svg?v=1)](https://packagist.org/packages/zenomailer/zenomailer)
 [![Total Downloads](https://img.shields.io/packagist/dt/zenomailer/zenomailer.svg?v=1)](https://packagist.org/packages/zenomailer/zenomailer)
@@ -17,7 +17,7 @@ Traditional email libraries are monolithic. ZenoMailer embraces **modern PHP arc
 - **Decoupled Services** - Envelope (data) → Middleware (processing) → Transport (delivery)
 - **PSR-15-style Middleware** - Composable "onion" pipeline for features like CSS inlining, dark mode, telemetry
 - **Multiple Transports** - SMTP, HTTP APIs (Brevo, Postmark, SES), JMAP - all via simple DSN strings
-- **Type-Safe** - Full PHP 8.1+ type declarations with strict mode
+- **Type-Safe** - Full PHP 8.2+ type declarations with strict mode
 - **Performance** - HTTP APIs are 2-5x faster than SMTP; SMTP batches get ~2x more from connection reuse (measured)
 - **Live-Verified** - every transport exercised against real providers (Gmail, Brevo, Postmark, Stalwart); every failure hit in testing became a tested, documented behavior
 
@@ -240,17 +240,12 @@ $mailer->send($envelope);
 
 Transport support: SMTP ✓ (negotiates SMTPUTF8, fails clearly if the server doesn't advertise it), Brevo/Postmark ✓ (JSON APIs), **SES ✗** (AWS does not support SMTPUTF8 - UTF-8 local parts are rejected explicitly; IDN domains work via punycode).
 
-### Batch Sending (Async)
+### Batch Sending
 
-For HTTP transports with async enabled:
+`sendBatch()` works on every transport (Brevo delivers concurrently with `async=true`; the rest sequentially) — and every envelope still goes through the middleware pipeline:
 
 ```php
-use ZenoMailer\Transport\BrevoTransport;
-
-$transport = new BrevoTransport($apiKey, ['async' => true]);
-
-$envelopes = [/* array of Envelope objects */];
-$results = $transport->sendBatch($envelopes);
+$results = $mailer->sendBatch($envelopes);
 
 foreach ($results as $result) {
     if ($result->isSuccess()) {
@@ -318,7 +313,7 @@ composer require zenomailer/zenomailer
 
 ## Requirements
 
-- PHP 8.1 or later
+- PHP 8.2 or later
 - ext-curl (for HTTP API transports)
 - ext-openssl (for SMTP TLS and DKIM signing)
 - ext-intl (for internationalized domains)

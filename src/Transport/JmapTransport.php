@@ -11,6 +11,8 @@ use ZenoMailer\Http\HttpResponse;
 
 final class JmapTransport implements TransportInterface
 {
+    use SequentialBatchSending;
+
     private string $host;
     private string $accountId;
     private string $authScheme;

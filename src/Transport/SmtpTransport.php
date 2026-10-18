@@ -11,6 +11,8 @@ use ZenoMailer\SerializedMessage;
 
 final class SmtpTransport implements TransportInterface, SignableTransport
 {
+    use SequentialBatchSending;
+
     private const CRLF = "\r\n";
 
     private MessageSerializer $serializer;

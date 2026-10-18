@@ -1,8 +1,19 @@
 {
     "name": "zenomailer/zenomailer",
     "type": "library",
-    "description": "ZenoMailer - Modern PHP 8.1+ email library with decoupled architecture, middleware pipeline, and multiple transport layers (SMTP, HTTP APIs, JMAP)",
-    "keywords": ["email", "mail", "mailer", "smtp", "brevo", "postmark", "ses", "jmap", "middleware", "php8"],
+    "description": "ZenoMailer - Modern PHP 8.2+ email library with decoupled architecture, middleware pipeline, and multiple transport layers (SMTP, HTTP APIs, JMAP)",
+    "keywords": [
+        "email",
+        "mail",
+        "mailer",
+        "smtp",
+        "brevo",
+        "postmark",
+        "ses",
+        "jmap",
+        "middleware",
+        "php8"
+    ],
     "authors": [
         {
             "name": "Carlos Matos",
@@ -13,7 +24,7 @@
         "lock": false
     },
     "require": {
-        "php": ">=8.1.0",
+        "php": ">=8.2.0",
         "ext-ctype": "*",
         "ext-filter": "*",
         "ext-hash": "*",

@@ -12,7 +12,7 @@ This guide maps every common PHPMailer task to its ZenoMailer equivalent. For th
 | Property configuration (`->Host`, `->Port`, ...) | DSN strings + fluent builder |
 | `send()` returns bool, errors in `->ErrorInfo` | `send()` returns a `TransportResult` |
 | SMTP / sendmail / `mail()` | SMTP + Brevo, Postmark, SES, JMAP (HTTP APIs) |
-| PHP 5.5+ | PHP 8.1+, strict types |
+| PHP 5.5+ | PHP 8.2+, strict types |
 | `SMTPKeepAlive` (opt-in, manual) | connection reuse on by default, validated with NOOP |
 
 ---

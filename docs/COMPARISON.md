@@ -8,7 +8,7 @@ A feature-by-feature comparison, including what was verified empirically (marked
 
 | | PHPMailer | ZenoMailer |
 |---|---|---|
-| Best for | Maximum maturity, PHP 7.x, S/MIME, `mail()`/sendmail | Modern PHP 8.1+, API transports, batching, extensibility |
+| Best for | Maximum maturity, PHP 7.x, S/MIME, `mail()`/sendmail | Modern PHP 8.2+, API transports, batching, extensibility |
 | License | LGPL-2.1 | MIT |
 | Age | ~20 years, billions of sends | new, verified against live receivers |
 | Verdict | The safe, proven choice | The modern choice — ahead on transports and DX, behind on accumulated hardening |
@@ -35,7 +35,7 @@ A feature-by-feature comparison, including what was verified empirically (marked
 | POP-before-SMTP | ✅ | ❌ |
 | `mail()` / sendmail transports | ✅ | ❌ |
 | HTTP API transports | ❌ | ✅ Brevo, Postmark, SES, JMAP — one identical API |
-| Concurrent batch sending | ❌ | ✅ curl_multi, measured **5x** (402ms vs 2007ms for 5 delayed requests) |
+| Concurrent batch sending | ❌ | ✅ `sendBatch()` on every transport; Brevo delivers concurrently via curl_multi, measured **5x** (402ms vs 2007ms for 5 delayed requests) |
 | Structured send results | ❌ (bool + `ErrorInfo`) | ✅ `TransportResult`: success, message, message ID, metadata |
 | Auto-retry with backoff + jitter | ❌ | ✅ transient failures (SMTP 4xx, HTTP 429/5xx) retried automatically |
 | Rate limiting | ❌ | ✅ token bucket per transport **[verified live: paces real API calls]** |
@@ -46,7 +46,7 @@ A feature-by-feature comparison, including what was verified empirically (marked
 | Bcc handling | ✅ | ✅ never in headers; explicit `Destinations` for SES |
 | Language files (localized errors) | ✅ 50+ languages | ❌ (English messages) |
 | Debug output levels | ✅ (`SMTPDebug`) | PSR-3 telemetry |
-| PHP version support | 5.5 – 8.x | 8.1+ |
+| PHP version support | 5.5 – 8.x | 8.2+ |
 
 ---
 
@@ -94,12 +94,12 @@ One production lesson was learned the hard way and turned into a feature: a DKIM
 1. **Battle-testing** — two decades of edge cases (broken servers, exotic line endings, odd auth flows) already survived. ZenoMailer has been verified against exactly one live receiver (Gmail) plus two API error paths.
 2. **Features**: S/MIME, XOAUTH2, `mail()`/sendmail, word wrap, iCal, POP-before-SMTP, `msgHTML`, localized error messages.
 3. **Ecosystem**: documentation depth, community answers, dependents.
-4. **Compatibility**: runs on PHP 5.5+; ZenoMailer requires 8.1+.
+4. **Compatibility**: runs on PHP 5.5+; ZenoMailer requires 8.2+ (8.1 is EOL).
 
 ---
 
 ## Recommendation
 
-- **Choose ZenoMailer** for new PHP 8.1+ projects — especially when you want API transports (Brevo/Postmark/SES), batch throughput, middleware-driven processing, or typed results. It does things PHPMailer structurally cannot.
+- **Choose ZenoMailer** for new PHP 8.2+ projects — especially when you want API transports (Brevo/Postmark/SES), batch throughput, middleware-driven processing, or typed results. It does things PHPMailer structurally cannot.
 - **Choose PHPMailer** when you need S/MIME, XOAUTH2, PHP 7.x, `mail()`/sendmail, or simply the accumulated confidence of twenty years in production.
 - **Migrating?** See the [Migration Guide](../MIGRATION.md) for task-by-task translations.

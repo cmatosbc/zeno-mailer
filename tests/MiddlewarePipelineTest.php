@@ -91,6 +91,8 @@ final class MiddlewarePipelineTest extends TestCase
         $order = [];
 
         $transport = new class implements TransportInterface {
+            use \ZenoMailer\Transport\SequentialBatchSending;
+
             public ?Envelope $received = null;
 
             public function send(Envelope $envelope): TransportResult

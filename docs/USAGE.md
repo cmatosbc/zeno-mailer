@@ -12,7 +12,7 @@ composer require zenomailer/zenomailer
 
 | Requirement | Needed for |
 |---|---|
-| PHP 8.1+ | always |
+| PHP 8.2+ | always |
 | ext-curl | HTTP API transports (Brevo, Postmark, SES, JMAP) |
 | psr/log | telemetry middleware (installed automatically) |
 | ext-intl | internationalized domains (IDN → punycode) |
@@ -372,13 +372,23 @@ $mailer = MailerBuilder::create()
 
 | Middleware | Enabled via | What it does |
 |---|---|---|
-| `TelemetryMiddleware` | `enableTelemetry(bool $enable = true, ?LoggerInterface $logger = null)` | PSR-3 logging around pipeline processing: subject, from, recipients, duration, failures. `logRecipients`/`logContent` constructor flags control detail (recipients are PII — disable in sensitive environments) |
 | `CssInlinerMiddleware` | `enableCssInlining()` | Inlines `<style>` block CSS into `style=""` attributes (simple selectors: element, `.class`, `#id`). The style block is removed after inlining. Regex-based — best for simple, classic email HTML |
 | `DarkModeGuardMiddleware` | `enableDarkModeGuard()` | Adds `color-scheme`/`supported-color-schemes` meta tags and a `prefers-color-scheme` style block that pins light colors |
 
+**Delivery telemetry** is not middleware — it wraps the transport (so it can observe the real `TransportResult`):
+
+```php
+$mailer = MailerBuilder::create()
+    ->withDsn('...')
+    ->enableTelemetry(true, $psr3Logger)   // logs: delivered/failed, message id, duration, attempts
+    ->build();
+```
+
+It logs `Sending email` (subject, from, recipients), then `Email delivered` (duration, message id, transport) or `Delivery failed` (error, retryable). Recipients are PII — disable with `enableTelemetry(true, $logger, logRecipients: false)`. The transport layers compose as: telemetry → retry → rate limit → transport.
+
 ### Pipeline order
 
-Middleware runs in this order: **Telemetry → CSS Inliner → Dark Mode Guard → your middleware (in the order added)**. The pipeline is stateless per send — running it twice processes twice, identically.
+Middleware runs in this order: **CSS Inliner → Dark Mode Guard → your middleware (in the order added)**. The pipeline is stateless per send — running it twice processes twice, identically.
 
 ---
 
@@ -450,15 +460,23 @@ Invalid envelopes (missing From, no recipients, empty body, header injection att
 
 ## 12. Batch Sending
 
-```php
-// SMTP: a loop reuses the connection automatically (keepalive)
-foreach ($envelopes as $envelope) {
-    $result = $mailer->send($envelope);
-}
-$mailer->getTransport()->disconnect();
+`sendBatch()` is part of `TransportInterface` — every transport has it (Brevo delivers concurrently, the rest sequentially), and the resilience layers (retry, rate limit, failover) apply per envelope.
 
-// Brevo with async=true: concurrent HTTP
-$results = $mailer->getTransport()->sendBatch($envelopes);
+```php
+// Through the Mailer: every envelope runs through the middleware pipeline first
+$results = $mailer->sendBatch($envelopes);
+
+foreach ($results as $result) {
+    if ($result->isSuccess()) {
+        echo 'Sent: ' . $result->getMessageId();
+    }
+}
+```
+
+```php
+// SMTP batches also reuse the connection automatically; close when done
+$mailer->sendBatch($envelopes);
+$mailer->getTransport()->disconnect();
 ```
 
 ---

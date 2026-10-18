@@ -10,6 +10,8 @@ use ZenoMailer\Http\HttpClientInterface;
 
 final class PostmarkTransport implements TransportInterface
 {
+    use SequentialBatchSending;
+
     private const API_URL = 'https://api.postmarkapp.com/email';
 
     private string $serverToken;

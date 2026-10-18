@@ -8,12 +8,12 @@ use ZenoMailer\DkimSigner;
 use ZenoMailer\Middleware\CssInlinerMiddleware;
 use ZenoMailer\Middleware\DarkModeGuardMiddleware;
 use ZenoMailer\Middleware\MiddlewareInterface;
-use ZenoMailer\Middleware\TelemetryMiddleware;
 use ZenoMailer\Transport\FailoverTransport;
 use ZenoMailer\Transport\RateLimitedTransport;
 use ZenoMailer\Transport\RateLimiter;
 use ZenoMailer\Transport\RetryTransport;
 use ZenoMailer\Transport\SignableTransport;
+use ZenoMailer\Transport\TelemetryTransport;
 use ZenoMailer\Transport\TransportFactory;
 use ZenoMailer\Transport\TransportInterface;
 use Psr\Log\LoggerInterface;
@@ -27,6 +27,8 @@ final class MailerBuilder
     private bool $enableDarkModeGuard = false;
     private bool $enableTelemetry = false;
     private ?LoggerInterface $logger = null;
+    private bool $telemetryLogRecipients = true;
+    private bool $telemetryLogContent = false;
     private ?DkimSigner $dkimSigner = null;
     /** @var list<TransportInterface> */
     private array $failovers = [];
@@ -69,10 +71,16 @@ final class MailerBuilder
         return $this;
     }
 
-    public function enableTelemetry(bool $enable = true, ?LoggerInterface $logger = null): self
-    {
+    public function enableTelemetry(
+        bool $enable = true,
+        ?LoggerInterface $logger = null,
+        bool $logRecipients = true,
+        bool $logContent = false
+    ): self {
         $this->enableTelemetry = $enable;
         $this->logger = $logger;
+        $this->telemetryLogRecipients = $logRecipients;
+        $this->telemetryLogContent = $logContent;
         return $this;
     }
 
@@ -162,10 +170,6 @@ final class MailerBuilder
         $mailer = new Mailer($finalTransport);
         $pipeline = $mailer->getPipeline();
 
-        if ($this->enableTelemetry) {
-            $pipeline->pipe(new TelemetryMiddleware($this->logger));
-        }
-
         if ($this->enableCssInlining) {
             $pipeline->pipe(new CssInlinerMiddleware());
         }
@@ -190,6 +194,10 @@ final class MailerBuilder
         if ($this->retryConfig !== null) {
             [$attempts, $baseDelayMs, $maxDelayMs] = $this->retryConfig;
             $transport = new RetryTransport($transport, $attempts, $baseDelayMs, $maxDelayMs, $this->logger);
+        }
+
+        if ($this->enableTelemetry) {
+            $transport = new TelemetryTransport($transport, $this->logger, $this->telemetryLogRecipients, $this->telemetryLogContent);
         }
 
         return $transport;

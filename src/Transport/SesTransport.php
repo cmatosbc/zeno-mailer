@@ -12,6 +12,8 @@ use ZenoMailer\MessageSerializer;
 
 final class SesTransport implements TransportInterface, SignableTransport
 {
+    use SequentialBatchSending;
+
     private string $accessKey;
     private string $secretKey;
     private string $region;
