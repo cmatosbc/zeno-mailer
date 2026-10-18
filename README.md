@@ -2,11 +2,11 @@
 
 **Modern PHP 8.1+ email library with decoupled architecture**
 
-[![Latest Version](https://img.shields.io/packagist/v/zenomailer/zenomailer.svg)](https://packagist.org/packages/zenomailer/zenomailer)
-[![Total Downloads](https://img.shields.io/packagist/dt/zenomailer/zenomailer.svg)](https://packagist.org/packages/zenomailer/zenomailer)
+[![Latest Version](https://img.shields.io/packagist/v/zenomailer/zenomailer.svg?v=1)](https://packagist.org/packages/zenomailer/zenomailer)
+[![Total Downloads](https://img.shields.io/packagist/dt/zenomailer/zenomailer.svg?v=1)](https://packagist.org/packages/zenomailer/zenomailer)
 [![Tests](https://github.com/cmatosbc/zeno-mailer/actions/workflows/tests.yml/badge.svg)](https://github.com/cmatosbc/zeno-mailer/actions/workflows/tests.yml)
-[![PHP Version](https://img.shields.io/packagist/php-v/zenomailer/zenomailer.svg)](https://packagist.org/packages/zenomailer/zenomailer)
-[![License](https://img.shields.io/packagist/l/zenomailer/zenomailer.svg)](LICENSE)
+[![PHP Version](https://img.shields.io/packagist/php-v/zenomailer/zenomailer.svg?v=1)](https://packagist.org/packages/zenomailer/zenomailer)
+[![License](https://img.shields.io/packagist/l/zenomailer/zenomailer.svg?v=1)](LICENSE)
 
 A clean-slate email library built on modern principles with a strict separation of concerns.
 
