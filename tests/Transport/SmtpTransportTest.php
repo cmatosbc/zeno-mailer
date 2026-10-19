@@ -468,6 +468,76 @@ final class SmtpTransportTest extends TestCase
         }
     }
 
+    public function testLargeAttachmentStreamsToSocketWithConstantMemory(): void
+    {
+        $server = new FakeSmtpServer('ok');
+
+        // 10MB attachment with deterministic content (includes dot-lines for the text part)
+        $attachmentPath = tempnam(sys_get_temp_dir(), 'zeno-big') ?: throw new \RuntimeException('tempnam failed');
+        $chunk = str_repeat("Aa1.+\r\n", 1400); // ~10KB per 1400 lines, dot-stuffed-safe pattern
+        $handle = fopen($attachmentPath, 'wb');
+        if ($handle === false) {
+            throw new \RuntimeException('temp file open failed');
+        }
+        for ($i = 0; $i < 1100; $i++) {
+            fwrite($handle, $i . ':' . $chunk);
+        }
+        fclose($handle);
+        $size = (int)filesize($attachmentPath);
+        self::assertGreaterThan(10_000_000, $size);
+
+        try {
+            $envelope = (new Envelope())
+                ->setFrom('sender@example.com')
+                ->addTo('to@example.com')
+                ->setSubject('Streaming integration')
+                ->setTextBody("Body with\n.a dot line\nEnd")
+                ->addAttachment($attachmentPath, 'data.bin');
+
+            $transport = new SmtpTransport('127.0.0.1', $server->port, false);
+
+            $peakBefore = memory_get_peak_usage(true);
+            $result = $transport->send($envelope);
+            $peakDelta = memory_get_peak_usage(true) - $peakBefore;
+
+            fprintf(STDERR, "\n[streaming] attachment=%dMB peak_delta=%.1fMB\n", (int)($size / 1_000_000), $peakDelta / 1_000_000);
+
+            self::assertTrue($result->isSuccess(), 'Send failed: ' . $result->getMessage());
+            self::assertLessThan(
+                30 * 1024 * 1024,
+                $peakDelta,
+                sprintf('Peak memory grew %.0fMB for a %dMB attachment - streaming is not working', $peakDelta / 1_000_000, $size / 1_000_000)
+            );
+
+            $transport->disconnect();
+
+            // The received message must contain the attachment content intact:
+            // extract the base64 section, decode, and hash-compare
+            $raw = $server->getTranscript()['raw_data'] ?? '';
+            self::assertStringContainsString('Content-Type: application/octet-stream; name=', $raw);
+            // dot-stuffing still applied to the text part
+            self::assertStringContainsString("\r\n..a dot line\r\n", $raw);
+
+            $start = strpos($raw, 'Content-Disposition: attachment; filename="data.bin"');
+            self::assertNotFalse($start, 'Attachment part missing from the received message');
+            $bodyStart = (int)strpos($raw, "\r\n\r\n", $start) + 4;
+            $end = strpos($raw, "\r\n--", $bodyStart);
+            self::assertNotFalse($end, 'Attachment section not terminated by a boundary');
+
+            $b64 = preg_replace('/\s+/', '', substr($raw, $bodyStart, $end - $bodyStart)) ?? '';
+            $decoded = base64_decode($b64, true);
+            self::assertNotFalse($decoded, 'Attachment payload must be valid base64');
+            self::assertSame(
+                hash_file('sha256', $attachmentPath),
+                hash('sha256', $decoded),
+                'Attachment content must survive the round trip byte-for-byte'
+            );
+        } finally {
+            unlink($attachmentPath);
+            $server->stop();
+        }
+    }
+
     private static function unstuff(string $raw): string
     {
         return preg_replace('/^\.\./m', '.', $raw) ?? $raw;

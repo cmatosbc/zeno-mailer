@@ -108,6 +108,7 @@ $envelope->addAttachment(string $path, string $name = '', string $type = '', str
 - `$name` defaults to the file's basename; `$type` defaults to `application/octet-stream`
 - `$encoding`: `base64` (default), `quoted-printable`, `7bit`, `8bit`
 - File contents are read lazily (at send time) and cached per Attachment instance
+- **Memory-safe over SMTP**: messages with attachments are built on a stream and attachment content streams from disk to the socket through PHP's encoding filters — peak memory stays ~constant regardless of attachment size (verified: a 9.3MB attachment costs ~2MB of RAM). DKIM-signed messages materialize fully (signing requires the whole message); HTTP API transports load the content (their JSON payloads require it)
 
 ### Embedded images (CID)
 

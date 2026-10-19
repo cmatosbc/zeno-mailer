@@ -8,6 +8,7 @@ use ZenoMailer\Envelope;
 use ZenoMailer\DkimSigner;
 use ZenoMailer\MessageSerializer;
 use ZenoMailer\SerializedMessage;
+use ZenoMailer\StreamedMessage;
 
 final class SmtpTransport implements TransportInterface, SignableTransport
 {
@@ -62,9 +63,14 @@ final class SmtpTransport implements TransportInterface, SignableTransport
     public function send(Envelope $envelope): TransportResult
     {
         try {
-            $message = $this->serializer->serialize($envelope);
             if ($this->dkimSigner !== null) {
-                $message = $this->dkimSigner->sign($message);
+                // DKIM signs the full message string (inherent to signing)
+                $message = $this->dkimSigner->sign($this->serializer->serialize($envelope));
+            } elseif ($envelope->getAttachments() !== []) {
+                // Memory-safe path: attachments stream from disk to the socket
+                $message = $this->serializer->serializeStreamed($envelope);
+            } else {
+                $message = $this->serializer->serialize($envelope);
             }
         } catch (\InvalidArgumentException $e) {
             return TransportResult::failure('Invalid envelope: ' . $e->getMessage());
@@ -348,20 +354,44 @@ final class SmtpTransport implements TransportInterface, SignableTransport
     /**
      * @param resource $socket
      */
-    private function data($socket, SerializedMessage $message): string
+    private function data($socket, SerializedMessage|StreamedMessage $message): string
     {
         $this->expect($this->sendCommand($socket, 'DATA'), ['354'], 'DATA');
 
-        $payload = self::dotStuff($message->getMessage()) . self::CRLF . '.' . self::CRLF;
-        $written = fwrite($socket, $payload);
-        if ($written === false || $written < strlen($payload)) {
-            throw new \RuntimeException('Failed to write message data to SMTP socket');
+        if ($message instanceof StreamedMessage) {
+            self::registerDotStuffFilter();
+            $stream = $message->getStream();
+            $filter = stream_filter_append($stream, DotStuffStreamFilter::NAME, STREAM_FILTER_READ);
+            if ($filter === false) {
+                throw new \RuntimeException('Failed to attach the dot-stuffing stream filter');
+            }
+
+            $copied = stream_copy_to_stream($stream, $socket);
+            if ($copied === false) {
+                throw new \RuntimeException('Failed to stream message data to SMTP socket');
+            }
+
+            // The streamed body already ends with CRLF; only the dot is needed
+            fwrite($socket, '.' . self::CRLF);
+        } else {
+            $payload = self::dotStuff($message->getMessage()) . self::CRLF . '.' . self::CRLF;
+            $written = fwrite($socket, $payload);
+            if ($written === false || $written < strlen($payload)) {
+                throw new \RuntimeException('Failed to write message data to SMTP socket');
+            }
         }
 
         $response = $this->readResponse($socket);
         $this->expect($response, ['250'], 'Message acceptance');
 
         return $response;
+    }
+
+    private static function registerDotStuffFilter(): void
+    {
+        if (!in_array(DotStuffStreamFilter::NAME, stream_get_filters(), true)) {
+            stream_filter_register(DotStuffStreamFilter::NAME, DotStuffStreamFilter::class);
+        }
     }
 
     /**

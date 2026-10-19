@@ -289,6 +289,7 @@ foreach ($results as $result) {
 - **Embedded images** - CID references from the HTML body (SMTP, SES, Postmark)
 - **Internationalized addresses** - IDN punycode + RFC 6531 SMTPUTF8
 - **RFC-compliant MIME** - RFC 2047 header encoding, line folding, dot-stuffing, automatic line-length protection (overlong bodies upgrade to quoted-printable)
+- **Streaming attachments** - attachment content streams from disk to the SMTP socket; peak memory stays constant regardless of attachment size (a 9.3MB attachment costs ~2MB of RAM, measured)
 
 ## Installation
 

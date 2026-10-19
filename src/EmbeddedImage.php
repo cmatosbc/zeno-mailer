@@ -70,6 +70,44 @@ final class EmbeddedImage
         return $this->content;
     }
 
+    /**
+     * Stream the base64-encoded content to a writable stream with constant
+     * memory (chunked read + PHP's native base64 stream filter).
+     *
+     * @param resource $dest
+     */
+    public function streamEncodedTo($dest): void
+    {
+        if (!file_exists($this->path) || !is_readable($this->path)) {
+            throw new \RuntimeException("Cannot read embedded image file: {$this->path}");
+        }
+
+        $source = fopen($this->path, 'rb');
+        if ($source === false) {
+            throw new \RuntimeException("Failed to open embedded image file: {$this->path}");
+        }
+
+        $filter = stream_filter_append(
+            $source,
+            'convert.base64-encode',
+            STREAM_FILTER_READ,
+            ['line-length' => 76, 'line-end-chars' => "\r\n"]
+        );
+
+        if ($filter === false) {
+            fclose($source);
+            throw new \RuntimeException('Failed to attach the base64 stream filter');
+        }
+
+        $copied = stream_copy_to_stream($source, $dest);
+        if ($copied === false) {
+            fclose($source);
+            throw new \RuntimeException("Failed to stream embedded image content: {$this->path}");
+        }
+
+        fclose($source);
+    }
+
     private function guessType(string $path): string
     {
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));

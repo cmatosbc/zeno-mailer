@@ -34,31 +34,12 @@ final class MessageSerializer
 
     public function serialize(Envelope $envelope): SerializedMessage
     {
-        $this->validate($envelope);
-
-        $from = $envelope->getFrom();
-        if ($from === null) {
-            throw new \InvalidArgumentException('Envelope must have a From address (call setFrom())');
-        }
-
-        if ($envelope->getAllRecipients() === []) {
-            throw new \InvalidArgumentException('Envelope must have at least one recipient');
-        }
+        $from = $this->assertSerializable($envelope);
 
         $text = $envelope->getTextBody();
         $html = $envelope->getHtmlBody();
         $attachments = $envelope->getAttachments();
         $embeddedImages = $envelope->getEmbeddedImages();
-
-        if ($text === '' && $html === '' && $attachments === [] && $embeddedImages === []) {
-            throw new \InvalidArgumentException('Envelope must have a text body, an HTML body or attachments');
-        }
-
-        if ($embeddedImages !== [] && $html === '') {
-            throw new \InvalidArgumentException(
-                'Embedded images require an HTML body (reference them with <img src="cid:...">)'
-            );
-        }
 
         $mixedBoundary = $attachments !== [] ? $this->generateBoundary('mixed') : null;
         $relatedBoundary = $embeddedImages !== [] ? $this->generateBoundary('related') : null;
@@ -85,6 +66,135 @@ final class MessageSerializer
         $message = implode(self::CRLF, $headers) . self::CRLF . self::CRLF . $body;
 
         return new SerializedMessage($message, $this->resolveMessageId($headers));
+    }
+
+    /**
+     * Memory-safe variant for messages with attachments: the message is
+     * built on a php://temp stream and attachment content streams from disk
+     * through PHP's encoding filters — peak memory stays constant regardless
+     * of attachment size. (DKIM signing requires the string path.)
+     */
+    public function serializeStreamed(Envelope $envelope): StreamedMessage
+    {
+        $from = $this->assertSerializable($envelope);
+
+        $text = $envelope->getTextBody();
+        $html = $envelope->getHtmlBody();
+        $attachments = $envelope->getAttachments();
+        $embeddedImages = $envelope->getEmbeddedImages();
+
+        $mixedBoundary = $this->generateBoundary('mixed');
+        $relatedBoundary = $embeddedImages !== [] ? $this->generateBoundary('related') : null;
+        $altBoundary = ($text !== '' && $html !== '') ? $this->generateBoundary('alt') : null;
+
+        $contentType = 'multipart/mixed; boundary="' . $mixedBoundary . '"';
+        $headers = $this->buildHeaders($envelope, $from, $contentType, null);
+
+        $stream = fopen('php://temp/maxmemory:2097152', 'r+b');
+        if ($stream === false) {
+            throw new \RuntimeException('Failed to open the message stream');
+        }
+
+        fwrite($stream, implode(self::CRLF, $headers) . self::CRLF . self::CRLF);
+        $this->writeStreamedBody($stream, $envelope, $mixedBoundary, $relatedBoundary, $altBoundary);
+
+        return new StreamedMessage($stream, $this->resolveMessageId($headers));
+    }
+
+    /**
+     * Shared validation + prologue for both serialization paths.
+     */
+    private function assertSerializable(Envelope $envelope): Address
+    {
+        $this->validate($envelope);
+
+        $from = $envelope->getFrom();
+        if ($from === null) {
+            throw new \InvalidArgumentException('Envelope must have a From address (call setFrom())');
+        }
+
+        if ($envelope->getAllRecipients() === []) {
+            throw new \InvalidArgumentException('Envelope must have at least one recipient');
+        }
+
+        $text = $envelope->getTextBody();
+        $html = $envelope->getHtmlBody();
+        $attachments = $envelope->getAttachments();
+        $embeddedImages = $envelope->getEmbeddedImages();
+
+        if ($text === '' && $html === '' && $attachments === [] && $embeddedImages === []) {
+            throw new \InvalidArgumentException('Envelope must have a text body, an HTML body or attachments');
+        }
+
+        if ($embeddedImages !== [] && $html === '') {
+            throw new \InvalidArgumentException(
+                'Embedded images require an HTML body (reference them with <img src="cid:...">)'
+            );
+        }
+
+        return $from;
+    }
+
+    /**
+     * Write the multipart body to a stream: content part(s) as strings,
+     * attachment and embedded-image content streamed from disk.
+     *
+     * @param resource $stream
+     */
+    private function writeStreamedBody($stream, Envelope $envelope, string $mixedBoundary, ?string $relatedBoundary, ?string $altBoundary): void
+    {
+        $text = $envelope->getTextBody();
+        $html = $envelope->getHtmlBody();
+
+        // Innermost content leaf: alternative pair or a single part (strings)
+        if ($altBoundary !== null) {
+            $alternativeBody = $this->renderMultipart($altBoundary, [
+                $this->renderTextPart('text/plain', $text, $envelope),
+                $this->renderTextPart('text/html', $html, $envelope),
+            ]);
+            $contentLeaf = 'Content-Type: multipart/alternative; boundary="' . $altBoundary . '"'
+                . self::CRLF . self::CRLF . $alternativeBody;
+        } elseif ($html !== '') {
+            [$encoded, $transferEncoding] = $this->encodeBody($html, $envelope->getEncoding());
+            $contentLeaf = 'Content-Type: text/html; charset=' . $envelope->getCharset()
+                . self::CRLF . 'Content-Transfer-Encoding: ' . $transferEncoding
+                . self::CRLF . self::CRLF . $encoded;
+        } else {
+            [$encoded, $transferEncoding] = $this->encodeBody($text, $envelope->getEncoding());
+            $contentLeaf = 'Content-Type: text/plain; charset=' . $envelope->getCharset()
+                . self::CRLF . 'Content-Transfer-Encoding: ' . $transferEncoding
+                . self::CRLF . self::CRLF . $encoded;
+        }
+
+        if ($relatedBoundary !== null) {
+            fwrite($stream, 'Content-Type: multipart/related; boundary="' . $relatedBoundary . '"; type="text/html"'
+                . self::CRLF . self::CRLF);
+            fwrite($stream, '--' . $relatedBoundary . self::CRLF . $contentLeaf . self::CRLF);
+
+            foreach ($envelope->getEmbeddedImages() as $image) {
+                fwrite($stream, '--' . $relatedBoundary . self::CRLF
+                    . $this->embeddedImagePartHeaders($image, $envelope->getCharset())
+                    . self::CRLF . self::CRLF);
+                $image->streamEncodedTo($stream);
+                fwrite($stream, self::CRLF);
+            }
+
+            fwrite($stream, '--' . $relatedBoundary . '--');
+        } else {
+            fwrite($stream, $contentLeaf);
+        }
+
+        foreach ($envelope->getAttachments() as $attachment) {
+            fwrite($stream, self::CRLF . '--' . $mixedBoundary . self::CRLF
+                . $this->attachmentPartHeaders($attachment, $envelope->getCharset())
+                . self::CRLF . self::CRLF);
+            $attachment->streamEncodedTo($stream);
+            fwrite($stream, self::CRLF);
+        }
+
+        // Trailing CRLF keeps the filter pipeline stateless at EOF and is
+        // valid transport padding before the DATA terminator.
+        fwrite($stream, self::CRLF . '--' . $mixedBoundary . '--' . self::CRLF);
     }
 
     private function validate(Envelope $envelope): void
@@ -285,10 +395,6 @@ final class MessageSerializer
 
     private function buildAttachmentPart(Attachment $attachment, string $charset): string
     {
-        $filename = HeaderEncoder::isAscii($attachment->getName())
-            ? HeaderEncoder::escapeQuotedString($attachment->getName())
-            : HeaderEncoder::encodeText($attachment->getName(), $charset);
-
         $content = $attachment->getContent();
         [$encoded, $transferEncoding] = match ($attachment->getEncoding()) {
             'quoted-printable' => [quoted_printable_encode($content), 'quoted-printable'],
@@ -296,25 +402,49 @@ final class MessageSerializer
             default => [rtrim(chunk_split(base64_encode($content), 76, self::CRLF), self::CRLF), 'base64'],
         };
 
-        return 'Content-Type: ' . $attachment->getType() . '; name=' . $filename
-            . self::CRLF . 'Content-Transfer-Encoding: ' . $transferEncoding
-            . self::CRLF . 'Content-Disposition: attachment; filename=' . $filename
+        return $this->attachmentPartHeaders($attachment, $charset)
             . self::CRLF . self::CRLF . $encoded;
     }
 
+    /**
+     * Attachment part headers (shared by the string and streamed paths).
+     */
+    private function attachmentPartHeaders(Attachment $attachment, string $charset): string
+    {
+        $filename = HeaderEncoder::isAscii($attachment->getName())
+            ? HeaderEncoder::escapeQuotedString($attachment->getName())
+            : HeaderEncoder::encodeText($attachment->getName(), $charset);
+
+        $transferEncoding = match ($attachment->getEncoding()) {
+            'quoted-printable' => 'quoted-printable',
+            '7bit', '8bit' => $attachment->getEncoding(),
+            default => 'base64',
+        };
+
+        return 'Content-Type: ' . $attachment->getType() . '; name=' . $filename
+            . self::CRLF . 'Content-Transfer-Encoding: ' . $transferEncoding
+            . self::CRLF . 'Content-Disposition: attachment; filename=' . $filename;
+    }
+
     private function buildEmbeddedImagePart(EmbeddedImage $image, string $charset): string
+    {
+        return $this->embeddedImagePartHeaders($image, $charset)
+            . self::CRLF . self::CRLF . rtrim(chunk_split(base64_encode($image->getContent()), 76, self::CRLF), self::CRLF);
+    }
+
+    /**
+     * Embedded image part headers (shared by the string and streamed paths).
+     */
+    private function embeddedImagePartHeaders(EmbeddedImage $image, string $charset): string
     {
         $filename = HeaderEncoder::isAscii($image->getName())
             ? HeaderEncoder::escapeQuotedString($image->getName())
             : HeaderEncoder::encodeText($image->getName(), $charset);
 
-        $encoded = rtrim(chunk_split(base64_encode($image->getContent()), 76, self::CRLF), self::CRLF);
-
         return 'Content-Type: ' . $image->getType() . '; name=' . $filename
             . self::CRLF . 'Content-Transfer-Encoding: base64'
             . self::CRLF . 'Content-ID: <' . $image->getCid() . '>'
-            . self::CRLF . 'Content-Disposition: inline; filename=' . $filename
-            . self::CRLF . self::CRLF . $encoded;
+            . self::CRLF . 'Content-Disposition: inline; filename=' . $filename;
     }
 
     /**

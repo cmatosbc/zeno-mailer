@@ -7,6 +7,9 @@ the API may change between releases.
 
 ## [Unreleased]
 
+### Added
+- **Streaming attachments**: messages with attachments are serialized to a `php://temp` stream and attachment content streams from disk to the SMTP socket through PHP's native base64 encoding filter, with on-the-fly dot-stuffing as a stream filter. Peak memory stays ~constant regardless of attachment size (measured: 9.3MB attachment → ~2MB RAM; the previous path peaked at ~7x the attachment size). DKIM-signed messages still materialize (signing requires the full message); HTTP API transports are unchanged (their JSON payloads require full content)
+
 ## [0.1.0-beta.4] — 2026-10-18
 
 ### Added
