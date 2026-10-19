@@ -7,6 +7,7 @@ namespace ZenoMailer;
 use ZenoMailer\Middleware\HandlerInterface;
 use ZenoMailer\Middleware\MiddlewarePipeline;
 use ZenoMailer\Transport\ClosableTransport;
+use ZenoMailer\Transport\SpoolCapableTransport;
 use ZenoMailer\Transport\TransportInterface;
 use ZenoMailer\Transport\TransportResult;
 
@@ -41,6 +42,25 @@ final class Mailer implements HandlerInterface
         if ($this->transport instanceof ClosableTransport) {
             $this->transport->disconnect();
         }
+    }
+
+    /**
+     * Re-send every spool-queued envelope through the transport chain.
+     *
+     * @return list<TransportResult>
+     */
+    public function flushSpool(): array
+    {
+        if ($this->transport instanceof SpoolCapableTransport) {
+            return $this->transport->flush();
+        }
+
+        return [];
+    }
+
+    public function queuedCount(): int
+    {
+        return $this->transport instanceof SpoolCapableTransport ? $this->transport->queuedCount() : 0;
     }
 
     public function send(Envelope $envelope): TransportResult

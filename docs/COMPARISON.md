@@ -70,7 +70,7 @@ Notes: HTTP API transports avoid the per-message SMTP round trips entirely; the 
 | Structure | 5,500-line god class: message building, MIME, SMTP client, DKIM, validation, error state in one mutable object | Envelope (data) / Middleware (processing) / Transport (delivery), each independently testable |
 | Typing | PHP 5.5-era patterns, broad mutable public surface | `strict_types`, `final` classes, `readonly`, `match`, constructor promotion |
 | Static analysis | (its own tooling) | PHPStan level 8: zero errors |
-| Test suite | extensive, mature | 189 tests / 1653 assertions, including **fake SMTP and HTTP servers** that verify full protocol transcripts, dot-stuffing round-trips, and a cryptographically independent DKIM verifier |
+| Test suite | extensive, mature | 220 tests / 7107 assertions, including **fake SMTP and HTTP servers** that verify full protocol transcripts, dot-stuffing round-trips, and a cryptographically independent DKIM verifier |
 | Known-answer crypto tests | — | SigV4 verified byte-for-byte against AWS's official test suite |
 
 ---

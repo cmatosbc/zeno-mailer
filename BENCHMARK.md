@@ -278,7 +278,7 @@ After benchmarking:
 1. **Review the results** - Understand where time is spent
 2. **Consider HTTP APIs** - For better performance, try Brevo, Postmark, or SES
 3. **Optimize your code** - Use the modern architecture for new projects
-4. **Monitor production** - Enable telemetry middleware for ongoing monitoring
+4. **Monitor production** - Enable delivery telemetry (`enableTelemetry()`) for ongoing monitoring
 
 ## Support
 

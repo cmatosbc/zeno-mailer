@@ -9,10 +9,12 @@ use ZenoMailer\Middleware\CssInlinerMiddleware;
 use ZenoMailer\Middleware\DarkModeGuardMiddleware;
 use ZenoMailer\Middleware\MiddlewareInterface;
 use ZenoMailer\Transport\FailoverTransport;
+use ZenoMailer\Transport\FileSpool;
 use ZenoMailer\Transport\RateLimitedTransport;
 use ZenoMailer\Transport\RateLimiter;
 use ZenoMailer\Transport\RetryTransport;
 use ZenoMailer\Transport\SignableTransport;
+use ZenoMailer\Transport\SpoolTransport;
 use ZenoMailer\Transport\TelemetryTransport;
 use ZenoMailer\Transport\TransportFactory;
 use ZenoMailer\Transport\TransportInterface;
@@ -35,6 +37,7 @@ final class MailerBuilder
     private ?RateLimiter $rateLimiter = null;
     /** @var array{0: int, 1: float, 2: float}|null */
     private ?array $retryConfig = null;
+    private ?string $spoolDirectory = null;
 
     public static function create(): self
     {
@@ -145,6 +148,18 @@ final class MailerBuilder
         return $this;
     }
 
+    /**
+     * Queue failed sends as files in the given directory instead of losing
+     * them; re-send them later with $mailer->flushSpool(). The spool sits
+     * outside the retry layer, so a message is stored once after retries
+     * are exhausted.
+     */
+    public function withSpool(string $directory): self
+    {
+        $this->spoolDirectory = $directory;
+        return $this;
+    }
+
     public function build(): Mailer
     {
         if ($this->transport === null) {
@@ -194,6 +209,10 @@ final class MailerBuilder
         if ($this->retryConfig !== null) {
             [$attempts, $baseDelayMs, $maxDelayMs] = $this->retryConfig;
             $transport = new RetryTransport($transport, $attempts, $baseDelayMs, $maxDelayMs, $this->logger);
+        }
+
+        if ($this->spoolDirectory !== null) {
+            $transport = new SpoolTransport($transport, new FileSpool($this->spoolDirectory));
         }
 
         if ($this->enableTelemetry) {

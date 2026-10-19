@@ -12,7 +12,7 @@ use Psr\Log\NullLogger;
  * Retries transient failures (as classified by TransportResult::isRetryable())
  * with exponential backoff and full jitter.
  */
-final class RetryTransport implements TransportInterface, ClosableTransport
+final class RetryTransport implements TransportInterface, ClosableTransport, SpoolCapableTransport
 {
     use SequentialBatchSending;
 
@@ -37,6 +37,20 @@ final class RetryTransport implements TransportInterface, ClosableTransport
         if ($this->inner instanceof ClosableTransport) {
             $this->inner->disconnect();
         }
+    }
+
+    public function flush(): array
+    {
+        if ($this->inner instanceof SpoolCapableTransport) {
+            return $this->inner->flush();
+        }
+
+        return [];
+    }
+
+    public function queuedCount(): int
+    {
+        return $this->inner instanceof SpoolCapableTransport ? $this->inner->queuedCount() : 0;
     }
 
     public function send(Envelope $envelope): TransportResult

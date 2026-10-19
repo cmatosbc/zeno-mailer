@@ -14,7 +14,7 @@ composer require zenomailer/zenomailer
 |---|---|
 | PHP 8.2+ | always |
 | ext-curl | HTTP API transports (Brevo, Postmark, SES, JMAP) |
-| psr/log | telemetry middleware (installed automatically) |
+| psr/log | delivery telemetry (installed automatically) |
 | ext-intl | internationalized domains (IDN → punycode) |
 | ext-mbstring | RFC 2047 header encoding for non-UTF-8 charsets (UTF-8 works without it) |
 | ext-openssl | SMTP TLS (STARTTLS / implicit TLS), DKIM signing |
@@ -482,7 +482,38 @@ $mailer->getTransport()->disconnect();
 
 ---
 
-## 13. Testing Your Setup
+## 13. Spool / Outbox (Survive Provider Outages)
+
+Failed sends can be queued as files and re-sent later instead of being lost:
+
+```php
+$mailer = MailerBuilder::create()
+    ->withDsn('smtp://user:pass@smtp.example.com:587?starttls=true')
+    ->withSpool('/var/spool/zeno')     // directory for queued messages
+    ->build();
+
+$result = $mailer->send($envelope);
+if (!$result->isSuccess() && isset($result->getMetadata()['spool_id'])) {
+    // The message is safely queued; it was not lost
+}
+
+// Later (cron, worker, manual):
+$results = $mailer->flushSpool();      // re-sends queued envelopes
+$count = $mailer->queuedCount();
+```
+
+Behavior:
+- The spool sits **outside the retry layer**: a message is stored once, after retries are exhausted
+- `flush()` re-sends through the full inner chain (retries included); successes are removed, failures stay queued with an incremented attempt count
+- Attachments and embedded images are stored **by path** — the files must still exist when the spool is flushed
+- The spool survives process restarts (plain JSON files, one per message)
+- Note: `flush()` sends bypass the outer telemetry layer
+
+**Verified live**: queue during a simulated outage (dead SMTP) → flush through a working transport delivered everything; a failed flush (IP changed mid-test) kept the messages queued for the next flush.
+
+---
+
+## 14. Testing Your Setup
 
 - **Postmark without an account**: use the `POSTMARK_API_TEST` server token — the real API simulates the send
 - **Local SMTP testing**: run a fake SMTP server (the test suite ships one in `tests/Integration/`) or use smtp4dev / MailHog
@@ -493,7 +524,7 @@ $mailer->getTransport()->disconnect();
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 | Symptom | Cause & fix |
 |---|---|
@@ -511,7 +542,7 @@ $mailer->getTransport()->disconnect();
 
 ---
 
-## 15. Security Notes
+## 16. Security Notes
 
 - All header values (subjects, names, custom headers, filenames) are validated and encoded — CRLF header injection is rejected at the boundary
 - Bcc recipients never appear in message headers
@@ -521,6 +552,6 @@ $mailer->getTransport()->disconnect();
 
 ---
 
-## 16. Coming from PHPMailer?
+## 17. Coming from PHPMailer?
 
 See the [Migration Guide](../MIGRATION.md) for side-by-side examples of every common task.

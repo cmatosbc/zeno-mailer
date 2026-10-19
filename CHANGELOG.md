@@ -7,6 +7,14 @@ the API may change between releases.
 
 ## [Unreleased]
 
+## [0.1.0-beta.6] — 2026-10-19
+
+### Added
+- **Spool/outbox**: `withSpool($directory)` queues failed sends as JSON files instead of losing them; `Mailer::flushSpool()` re-sends them through the full transport chain (successes removed, failures kept with attempt counts). Attachments are stored by path. Verified live: outage → queue → a failed flush (IP changed mid-test) kept the messages queued → the next flush delivered everything
+- `CONTRIBUTING.md` documenting the CI-before-main workflow
+
+## [0.1.0-beta.5] — 2026-10-19
+
 ### Added
 - **Streaming attachments**: messages with attachments are serialized to a `php://temp` stream and attachment content streams from disk to the SMTP socket through PHP's native base64 encoding filter, with on-the-fly dot-stuffing as a stream filter. Peak memory stays ~constant regardless of attachment size (measured: 9.3MB attachment → ~2MB RAM; the previous path peaked at ~7x the attachment size). DKIM-signed messages still materialize (signing requires the full message); HTTP API transports are unchanged (their JSON payloads require full content)
 
@@ -64,7 +72,9 @@ the API may change between releases.
 - Typed results (`TransportResult`) with per-send metadata
 - 189 tests including fake SMTP/HTTP servers; PHPStan level 8 clean
 
-[Unreleased]: https://github.com/cmatosbc/zeno-mailer/compare/v0.1.0-beta.4...HEAD
+[Unreleased]: https://github.com/cmatosbc/zeno-mailer/compare/v0.1.0-beta.6...HEAD
+[0.1.0-beta.6]: https://github.com/cmatosbc/zeno-mailer/compare/v0.1.0-beta.5...v0.1.0-beta.6
+[0.1.0-beta.5]: https://github.com/cmatosbc/zeno-mailer/compare/v0.1.0-beta.4...v0.1.0-beta.5
 [0.1.0-beta.4]: https://github.com/cmatosbc/zeno-mailer/compare/v0.1.0-beta.3...v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/cmatosbc/zeno-mailer/compare/v0.1.0-beta.2...v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/cmatosbc/zeno-mailer/compare/v0.1.0-beta.1...v0.1.0-beta.2

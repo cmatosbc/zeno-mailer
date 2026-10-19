@@ -15,7 +15,7 @@ A clean-slate email library built on modern principles with a strict separation 
 Traditional email libraries are monolithic. ZenoMailer embraces **modern PHP architecture**:
 
 - **Decoupled Services** - Envelope (data) → Middleware (processing) → Transport (delivery)
-- **PSR-15-style Middleware** - Composable "onion" pipeline for features like CSS inlining, dark mode, telemetry
+- **PSR-15-style Middleware** - Composable "onion" pipeline for features like CSS inlining and dark mode
 - **Multiple Transports** - SMTP, HTTP APIs (Brevo, Postmark, SES), JMAP - all via simple DSN strings
 - **Type-Safe** - Full PHP 8.2+ type declarations with strict mode
 - **Performance** - HTTP APIs are 2-5x faster than SMTP; SMTP batches get ~2x more from connection reuse (measured)
@@ -78,14 +78,24 @@ $mailer = MailerBuilder::create()
 $result = $mailer->send($envelope);
 ```
 
-### With Middleware (CSS Inlining, Dark Mode, Telemetry)
+### JMAP
+
+```php
+$mailer = MailerBuilder::create()
+    ->withDsn('jmap://:API_TOKEN@jmap.example.com')   // account id auto-discovered
+    ->build();
+
+$result = $mailer->send($envelope);
+```
+
+### With Middleware and Telemetry
 
 ```php
 $mailer = MailerBuilder::create()
     ->withDsn('brevo://YOUR_API_KEY@default')
-    ->enableCssInlining()        // Inline CSS automatically
-    ->enableDarkModeGuard()      // Ensure dark mode compatibility
-    ->enableTelemetry()          // Log with PSR-3 logger
+    ->enableCssInlining()        // Inline CSS automatically (middleware)
+    ->enableDarkModeGuard()      // Ensure dark mode compatibility (middleware)
+    ->enableTelemetry()          // Delivery logging via PSR-3 (wraps the transport)
     ->build();
 
 $result = $mailer->send($envelope);
@@ -119,8 +129,9 @@ $envelope->setReplyTo('reply@example.com', 'Reply Name');
 $envelope->addAttachment('/path/to/file.pdf', 'document.pdf');
 
 // Embedded image, referenced from the HTML body via CID
+// (setHtmlBody replaces the body — include your full content)
 $envelope->addEmbeddedImage('/path/to/logo.png', 'logo');
-$envelope->setHtmlBody('<img src="cid:logo" alt="Logo"><h1>Hello</h1>');
+$envelope->setHtmlBody('<img src="cid:logo" alt="Logo"><h1>Hello</h1><p>HTML content</p>');
 
 // Custom headers
 $envelope->setHeaders(['X-Custom' => 'value']);
@@ -173,14 +184,14 @@ $mailer = MailerBuilder::create()
 
 ### Middleware Pipeline
 
-Middleware processes emails before sending:
+Middleware processes emails before sending (telemetry wraps the transport instead — see the [Usage Guide](docs/USAGE.md)):
 
 ```php
 $mailer = MailerBuilder::create()
     ->withDsn('brevo://API_KEY@default')
     ->enableCssInlining()          // Inline <style> tags
     ->enableDarkModeGuard()        // Add dark mode support
-    ->enableTelemetry()            // Log with PSR-3
+    ->enableTelemetry()            // Delivery logging via PSR-3
     ->build();
 ```
 
@@ -274,14 +285,15 @@ foreach ($results as $result) {
 
 - **CSS Inliner** - Automatically inline CSS for email clients
 - **Dark Mode Guard** - Ensure compatibility with dark mode
-- **Telemetry** - PSR-3 logging and monitoring
 - **Custom** - Easy to create your own
+- **Delivery Telemetry** - PSR-3 logging of real delivery outcomes (transport decorator, not middleware)
 
 ### 🛡️ Resilience
 
 - **Auto-retry** - transient failures (SMTP 4xx, HTTP 429/5xx) retried with exponential backoff + jitter
 - **Rate limiting** - token bucket per transport (`withRateLimit(300, 'day')`)
 - **Failover** - backup transport chain (`withFailover($backup)`)
+- **Spool/outbox** - failed sends queued to disk, re-sent later (`withSpool($dir)` + `flushSpool()`) — contact forms survive provider outages
 
 ### 🔐 Deliverability
 
@@ -310,7 +322,9 @@ composer require zenomailer/zenomailer
 - [Complete Usage Guide](docs/USAGE.md) - every option, transport and middleware, reference-style
 - [PHPMailer vs ZenoMailer](docs/COMPARISON.md) - honest feature-by-feature comparison
 - [Migration Guide](MIGRATION.md) - Coming from PHPMailer?
+- [Changelog](CHANGELOG.md) - every release, Keep-a-Changelog format
 - [Benchmark Results](BENCHMARK.md)
+- [Contributing](CONTRIBUTING.md) - development workflow and release checklist
 
 ## Requirements
 

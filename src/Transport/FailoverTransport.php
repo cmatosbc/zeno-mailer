@@ -10,7 +10,7 @@ use ZenoMailer\Envelope;
  * Tries transports in order; the first success wins. When all fail, the
  * last failure is returned with every attempt's error in the metadata.
  */
-final class FailoverTransport implements TransportInterface, ClosableTransport
+final class FailoverTransport implements TransportInterface, ClosableTransport, SpoolCapableTransport
 {
     use SequentialBatchSending;
 
@@ -34,6 +34,30 @@ final class FailoverTransport implements TransportInterface, ClosableTransport
                 $transport->disconnect();
             }
         }
+    }
+
+    public function flush(): array
+    {
+        $results = [];
+        foreach ($this->transports as $transport) {
+            if ($transport instanceof SpoolCapableTransport) {
+                $results = [...$results, ...$transport->flush()];
+            }
+        }
+
+        return $results;
+    }
+
+    public function queuedCount(): int
+    {
+        $count = 0;
+        foreach ($this->transports as $transport) {
+            if ($transport instanceof SpoolCapableTransport) {
+                $count += $transport->queuedCount();
+            }
+        }
+
+        return $count;
     }
 
     public function send(Envelope $envelope): TransportResult

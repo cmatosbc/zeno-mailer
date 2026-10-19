@@ -186,6 +186,127 @@ final class Envelope
     }
 
     /**
+     * Serializable representation for the spool/outbox. Attachments and
+     * embedded images are stored by PATH — the files must still exist when
+     * the spool is flushed.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        $addressToArray = static fn (?Address $a): ?array => $a === null
+            ? null
+            : ['email' => $a->getEmail(), 'name' => $a->getName()];
+
+        return [
+            'from' => $addressToArray($this->from),
+            'replyTo' => $addressToArray($this->replyTo),
+            'to' => array_map($addressToArray, $this->to),
+            'cc' => array_map($addressToArray, $this->cc),
+            'bcc' => array_map($addressToArray, $this->bcc),
+            'subject' => $this->subject,
+            'textBody' => $this->textBody,
+            'htmlBody' => $this->htmlBody,
+            'attachments' => array_map(
+                static fn (Attachment $a): array => [
+                    'path' => $a->getPath(), 'name' => $a->getName(),
+                    'type' => $a->getType(), 'encoding' => $a->getEncoding(),
+                ],
+                $this->attachments
+            ),
+            'embeddedImages' => array_map(
+                static fn (EmbeddedImage $i): array => [
+                    'path' => $i->getPath(), 'cid' => $i->getCid(),
+                    'name' => $i->getName(), 'type' => $i->getType(),
+                ],
+                $this->embeddedImages
+            ),
+            'headers' => $this->headers,
+            'charset' => $this->charset,
+            'encoding' => $this->encoding,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    public static function fromArray(array $data): self
+    {
+        $addressFromArray = static function (array $a): Address {
+            return new Address((string)($a['email'] ?? ''), (string)($a['name'] ?? ''));
+        };
+
+        $envelope = new self();
+
+        $from = $data['from'] ?? null;
+        if (is_array($from)) {
+            $envelope->from = $addressFromArray($from);
+        }
+
+        $replyTo = $data['replyTo'] ?? null;
+        if (is_array($replyTo)) {
+            $envelope->replyTo = $addressFromArray($replyTo);
+        }
+
+        foreach (['to', 'cc', 'bcc'] as $list) {
+            $items = $data[$list] ?? [];
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    if (is_array($item)) {
+                        $envelope->{$list}[] = $addressFromArray($item);
+                    }
+                }
+            }
+        }
+
+        $envelope->subject = (string)($data['subject'] ?? '');
+        $envelope->textBody = (string)($data['textBody'] ?? '');
+        $envelope->htmlBody = (string)($data['htmlBody'] ?? '');
+
+        $attachments = $data['attachments'] ?? [];
+        if (is_array($attachments)) {
+            foreach ($attachments as $a) {
+                if (is_array($a)) {
+                    $envelope->attachments[] = new Attachment(
+                        (string)($a['path'] ?? ''),
+                        (string)($a['name'] ?? ''),
+                        (string)($a['type'] ?? ''),
+                        (string)($a['encoding'] ?? 'base64')
+                    );
+                }
+            }
+        }
+
+        $embedded = $data['embeddedImages'] ?? [];
+        if (is_array($embedded)) {
+            foreach ($embedded as $i) {
+                if (is_array($i)) {
+                    $envelope->embeddedImages[] = new EmbeddedImage(
+                        (string)($i['path'] ?? ''),
+                        (string)($i['cid'] ?? ''),
+                        (string)($i['name'] ?? ''),
+                        (string)($i['type'] ?? '')
+                    );
+                }
+            }
+        }
+
+        $headers = $data['headers'] ?? [];
+        if (is_array($headers)) {
+            foreach ($headers as $name => $value) {
+                if (is_string($name) && is_string($value)) {
+                    $envelope->headers[$name] = $value;
+                }
+            }
+        }
+
+        $envelope->charset = (string)($data['charset'] ?? 'utf-8');
+        $envelope->encoding = (string)($data['encoding'] ?? '8bit');
+
+        return $envelope;
+    }
+
+    /**
      * True when any address on this envelope has a UTF-8 local part,
      * requiring the SMTPUTF8 extension (RFC 6531) on the delivery path.
      */
