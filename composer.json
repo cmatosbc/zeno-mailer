@@ -32,7 +32,7 @@
         "psr/log": "^3.0"
     },
     "require-dev": {
-        "phpmailer/phpmailer": "^6.9",
+        "phpmailer/phpmailer": "^6.9 || ^7.0",
         "phpstan/phpstan": "^2.0",
         "phpunit/phpunit": "^11.0 || ^12.0"
     },
