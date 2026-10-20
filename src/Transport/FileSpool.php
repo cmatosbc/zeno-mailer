@@ -15,12 +15,12 @@ final class FileSpool
 {
     public function __construct(private readonly string $directory)
     {
-        if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
-            throw new \RuntimeException("Failed to create the spool directory: {$directory}");
+        if (!is_dir($directory) && !@mkdir($directory, 0700, true) && !is_dir($directory)) {
+            throw new SpoolException("Failed to create the spool directory: {$directory}");
         }
 
         if (!is_writable($directory)) {
-            throw new \RuntimeException("Spool directory is not writable: {$directory}");
+            throw new SpoolException("Spool directory is not writable: {$directory}");
         }
     }
 
@@ -41,7 +41,7 @@ final class FileSpool
         $bytes = json_encode($entry, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
         $written = file_put_contents($this->pathFor($id), $bytes);
         if ($written === false) {
-            throw new \RuntimeException("Failed to write spool entry: {$id}");
+            throw new SpoolException("Failed to write spool entry: {$id}");
         }
 
         return $id;
@@ -85,7 +85,7 @@ final class FileSpool
     {
         $file = $this->pathFor($id);
         if (file_exists($file) && !unlink($file)) {
-            throw new \RuntimeException("Failed to remove spool entry: {$id}");
+            throw new SpoolException("Failed to remove spool entry: {$id}");
         }
     }
 

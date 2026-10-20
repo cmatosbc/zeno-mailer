@@ -277,7 +277,7 @@ The scheme `jmap://` implies HTTPS; use `jmap+http://` for plain-HTTP servers (l
 | `auth` | `bearer` | `bearer` (API token) or `basic` (username:password, for self-hosted servers) |
 | `account_id` | auto | Pin the JMAP account id (with `auth=basic` the DSN user part is the login username, so the account id always auto-discovers unless pinned here) |
 | `drafts_mailbox_id` | auto | Server-assigned mailbox id for the draft; by default the Drafts mailbox is looked up by role (and created on first use) |
-| `api_url` | from session | Override the submission endpoint (reverse proxies, testing) |
+| `base_url` | from session | Override the submission endpoint (reverse proxies, testing) |
 | `timeout` | `30` | Request timeout |
 
 - The **account id is auto-discovered** from the session's primary mail account (server-assigned ids like Fastmail's are opaque)
@@ -441,6 +441,8 @@ Transport support: SMTP ✓ · Brevo ✓ · Postmark ✓ · SES ✗ (no SMTPUTF8
 
 ## 11. Error Handling
 
+### The contract
+
 `send()` never throws for delivery problems — it returns a `TransportResult`:
 
 ```php
@@ -456,6 +458,18 @@ What DOES throw (before any network I/O):
 - `RuntimeException` from `MailerBuilder::build()` on misconfiguration (missing transport, DKIM on an unsupported transport)
 
 Invalid envelopes (missing From, no recipients, empty body, header injection attempts) are caught by the serializer and returned as **failure results** with a precise message — so a single bad email can't crash a batch loop.
+
+### Exception taxonomy
+
+| Exception | When | Catch it for |
+|---|---|---|
+| `\InvalidArgumentException` | invalid input at data-set time (bad address, CR/LF in subject, invalid header, bad DSN, invalid option value) | programming errors — let them crash in development |
+| `ZenoMailer\Exception` | base class for library runtime failures | any library-specific runtime issue |
+| `Transport\SmtpReplyException` | the SMTP server rejected a command (carries `getReplyCode()`, `isTransient()`) | SMTP-level handling |
+| `Transport\JmapServerException` | a JMAP server-level error | JMAP-level handling |
+| `Transport\SpoolException` | spool storage I/O failed | a send failed AND could not be queued — handle immediately |
+
+The transport exceptions extend `ZenoMailer\Exception`, which extends `\RuntimeException` — existing `catch (\RuntimeException)` blocks keep working.
 
 ---
 

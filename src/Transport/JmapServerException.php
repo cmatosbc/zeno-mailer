@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace ZenoMailer\Transport;
 
+use ZenoMailer\Exception;
+
 /**
  * A JMAP-level error (server response), carrying the response context and
  * whether the failure is transient.
  */
-final class JmapServerException extends \RuntimeException
+final class JmapServerException extends Exception
 {
     private bool $retryable;
 

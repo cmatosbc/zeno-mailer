@@ -86,7 +86,7 @@ final class JmapTransport implements TransportInterface
             }
 
             $session = $this->getSession();
-            $apiUrl = $this->options['api_url'] ?? $session['apiUrl']
+            $apiUrl = $this->options['base_url'] ?? $session['apiUrl']
                 ?? throw new \RuntimeException('Invalid JMAP session response: missing apiUrl');
             $apiUrl = $this->resolveUrl((string)$apiUrl);
             $accountId = $this->resolveAccountId($session);

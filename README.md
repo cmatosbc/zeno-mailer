@@ -372,6 +372,13 @@ examples/
 └── modern-with-logging.php          # PSR-3 logging
 ```
 
+## Versioning & Compatibility
+
+ZenoMailer follows [Semantic Versioning](https://semver.org/):
+
+- **0.x (current betas)** — the API may still change between releases; check the [Changelog](CHANGELOG.md) when upgrading
+- **1.0.0 (upcoming)** — the API freezes: breaking changes only in major versions, deprecations kept for at least one minor
+
 ## License
 
 MIT

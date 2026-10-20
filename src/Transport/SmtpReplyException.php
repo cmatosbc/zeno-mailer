@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace ZenoMailer\Transport;
 
+use ZenoMailer\Exception;
+
 /**
  * Thrown when the SMTP server rejects a command; carries the numeric
  * reply code so failures can be classified (4xx transient, 5xx permanent).
  */
-final class SmtpReplyException extends \RuntimeException
+final class SmtpReplyException extends Exception
 {
     private readonly int $replyCode;
 
